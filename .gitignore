@@ -1,0 +1,24 @@
+# Rust build artifacts
+/target/
+**/*.rs.bk
+*.profraw
+*.profdata
+
+# Environment and IDEs
+.DS_Store
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Test outputs and benchmarks
+/bench_results/
+/test_reports/
+
+# Safety: Prevent accidental commits of live malware samples
+samples/malware/*
+!samples/malware/.gitkeep
+!samples/manifest.json
+*.infected
+*.malware

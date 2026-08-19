@@ -1,0 +1,41 @@
+[package]
+name = "raya"
+version = "0.1.0"
+edition = "2021"
+authors = ["Raya Core Team"]
+description = "Rust-native malware detection and binary pattern-matching engine"
+readme = "README.md"
+license = "MIT OR Apache-2.0"
+keywords = ["malware-analysis", "yara", "security", "pattern-matching", "pe-analysis"]
+categories = ["command-line-utilities", "development-tools::profiling"]
+
+[dependencies]
+clap = { version = "4.5", features = ["derive", "cargo"] }
+aho-corasick = "1.1"
+regex = "1.10"
+sha2 = "0.10"
+sha1 = "0.10"
+md-5 = "0.10"
+rayon = "1.10"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+colored = "2.1"
+walkdir = "2.5"
+thiserror = "1.0"
+
+[dev-dependencies]
+tempfile = "3.10"
+
+[[bin]]
+name = "raya"
+path = "src/main.rs"
+
+[lib]
+name = "raya"
+path = "src/lib.rs"
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 1
+panic = "abort"
