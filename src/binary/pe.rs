@@ -1,6 +1,6 @@
 use crate::entropy::shannon_entropy;
 
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct PeSection {
     pub name: String,
     pub virtual_size: u32,
@@ -14,14 +14,14 @@ pub struct PeSection {
     pub is_executable: bool,
 }
 
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct PeImport {
     pub dll: String,
     pub functions: Vec<String>,
     pub ordinals: Vec<u16>,
 }
 
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct PeInfo {
     pub is_pe: bool,
     pub is_pe32_plus: bool,

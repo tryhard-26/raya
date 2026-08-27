@@ -1,6 +1,6 @@
 use crate::entropy::shannon_entropy;
 
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct ElfSection {
     pub name: String,
     pub sh_type: u32,
@@ -14,7 +14,7 @@ pub struct ElfSection {
     pub is_executable: bool,
 }
 
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct ElfInfo {
     pub is_elf: bool,
     pub is_64: bool,
