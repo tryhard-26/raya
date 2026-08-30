@@ -1,3 +1,4 @@
 fn main() {
-    println!("Raya static detection engine");
+    let exit_code = raya::cli::run_cli();
+    std::process::exit(exit_code);
 }
