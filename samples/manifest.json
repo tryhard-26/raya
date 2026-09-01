@@ -1,0 +1,66 @@
+[
+  {
+    "sha256": "8e4c19a9f24e3a479d23315a6b0c2a8f8d2b90623d6a3f5a2b1c8e9f0a1b2c3d",
+    "family": "Emotet",
+    "source": "MalwareBazaar",
+    "download_identifier": "emotet_loader_2026_01",
+    "file_type": "PE32+",
+    "expected_detections": [
+      "process_injection",
+      "powershell_obfuscated_loader"
+    ],
+    "date_acquired": "2026-01-15",
+    "tags": ["trojan", "loader", "banking"]
+  },
+  {
+    "sha256": "4b5d28a3f81e9b207d43216c5a0b1e8f9d3b80512c5a2e4a1b0c7d8e9f0a1b2c",
+    "family": "LockBit3.0",
+    "source": "VX-Underground",
+    "download_identifier": "lockbit_black_build",
+    "file_type": "PE32",
+    "expected_detections": [
+      "ransomware_behavior_indicators",
+      "packed_pe_indicators"
+    ],
+    "date_acquired": "2026-02-10",
+    "tags": ["ransomware", "crypto", "shadow_deletion"]
+  },
+  {
+    "sha256": "1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f5a6b7c8d9e0f1a2b",
+    "family": "CobaltStrike",
+    "source": "Malpedia",
+    "download_identifier": "cs_beacon_https_x64",
+    "file_type": "PE32+",
+    "expected_detections": [
+      "c2_network_beaconing",
+      "process_injection"
+    ],
+    "date_acquired": "2026-02-28",
+    "tags": ["c2", "beacon", "injection"]
+  },
+  {
+    "sha256": "7f8e9d0c1b2a3f4e5d6c7b8a9f0e1d2c3b4a5f6e7d8c9b0a1f2e3d4c5b6a7f8e",
+    "family": "RedLineStealer",
+    "source": "MalwareBazaar",
+    "download_identifier": "redline_infostealer_payload",
+    "file_type": "PE32",
+    "expected_detections": [
+      "registry_run_keys_persistence",
+      "c2_network_beaconing"
+    ],
+    "date_acquired": "2026-03-01",
+    "tags": ["stealer", "persistence"]
+  },
+  {
+    "sha256": "3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f5a6b7c8d9e0f1a2b3c4d",
+    "family": "UPXPackedDownloader",
+    "source": "TheZoo",
+    "download_identifier": "upx_downloader_sample",
+    "file_type": "PE32",
+    "expected_detections": [
+      "packed_pe_indicators"
+    ],
+    "date_acquired": "2026-03-05",
+    "tags": ["packer", "upx"]
+  }
+]

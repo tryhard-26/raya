@@ -27,11 +27,11 @@ pub enum Commands {
         target: PathBuf,
 
         /// Path to rule file or directory containing rules (default: ./rules)
-        #[arg(short, long)]
+        #[arg(short = 'R', long)]
         rules: Option<PathBuf>,
 
         /// Recursively traverse subdirectories
-        #[arg(short, long, default_value_t = true)]
+        #[arg(short = 'r', long, default_value_t = true)]
         recursive: bool,
 
         /// Output results in JSON format

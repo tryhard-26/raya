@@ -1,0 +1,20 @@
+rule registry_run_keys_persistence : windows persistence {
+    meta:
+        author = "Raya Research Team"
+        description = "Detects persistence mechanisms utilizing Windows registry Run and RunOnce autorun keys"
+        severity = "medium"
+        technique = "T1547.001"
+        reference = "https://attack.mitre.org/techniques/T1547/001/"
+
+    strings:
+        $reg_run     = "CurrentVersion\\Run" ascii wide nocase
+        $reg_runonce = "CurrentVersion\\RunOnce" ascii wide nocase
+        $reg_policies= "Microsoft\\Windows\\CurrentVersion\\Policies\\Explorer\\Run" ascii wide nocase
+        $reg_usershell = "Explorer\\User Shell Folders" ascii wide nocase
+        $reg_api1    = "RegSetValueEx" ascii wide
+        $reg_api2    = "RegCreateKeyEx" ascii wide
+
+    condition:
+        ($reg_run or $reg_runonce or $reg_policies or $reg_usershell)
+        and ($reg_api1 or $reg_api2 or pe.import("advapi32.dll", "RegSetValueExA") or pe.import("advapi32.dll", "RegSetValueExW"))
+}

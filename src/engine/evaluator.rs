@@ -71,19 +71,33 @@ impl<'a, 'b> Evaluator<'a, 'b> {
                 EvalValue::Bool(false)
             }
             Expr::StringCount(id) => {
+                let lookup_id = if id.starts_with('#') {
+                    format!("${}", &id[1..])
+                } else if !id.starts_with('$') {
+                    format!("${}", id)
+                } else {
+                    id.clone()
+                };
                 let count = self
                     .context
                     .string_matches
-                    .get(id)
+                    .get(&lookup_id)
                     .map(|m| m.len())
                     .unwrap_or(0);
                 EvalValue::Int(count as i64)
             }
             Expr::StringOffset(id) => {
+                let lookup_id = if id.starts_with('@') {
+                    format!("${}", &id[1..])
+                } else if !id.starts_with('$') {
+                    format!("${}", id)
+                } else {
+                    id.clone()
+                };
                 let offset = self
                     .context
                     .string_matches
-                    .get(id)
+                    .get(&lookup_id)
                     .and_then(|m| m.first())
                     .map(|m| m.offset as i64)
                     .unwrap_or(-1);

@@ -1,0 +1,21 @@
+rule process_injection : windows injection malware {
+    meta:
+        author = "Raya Research Team"
+        description = "Detects characteristic Windows process injection API combinations (VirtualAllocEx, WriteProcessMemory, CreateRemoteThread)"
+        severity = "high"
+        technique = "T1055"
+        reference = "https://attack.mitre.org/techniques/T1055/"
+
+    strings:
+        $va  = "VirtualAlloc" ascii wide
+        $vae = "VirtualAllocEx" ascii wide
+        $wpm = "WriteProcessMemory" ascii wide
+        $crt = "CreateRemoteThread" ascii wide
+        $qapc = "QueueUserAPC" ascii wide
+        $ntw = "NtWriteVirtualMemory" ascii wide
+
+    condition:
+        ($vae and $wpm and $crt)
+        or (2 of ($vae, $wpm, $crt, $qapc, $ntw) and pe.is_pe)
+        or (pe.import("kernel32.dll", "VirtualAllocEx") and pe.import("kernel32.dll", "WriteProcessMemory"))
+}

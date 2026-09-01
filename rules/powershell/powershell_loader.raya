@@ -1,0 +1,26 @@
+rule powershell_obfuscated_loader : windows execution loader {
+    meta:
+        author = "Raya Research Team"
+        description = "Detects obfuscated PowerShell download cradles and encoded command executions"
+        severity = "high"
+        technique = "T1059.001"
+        reference = "https://attack.mitre.org/techniques/T1059/001/"
+
+    strings:
+        $ps1 = "powershell" ascii wide nocase
+        $ps2 = "pwsh" ascii wide nocase
+        $enc1 = "-enc" ascii wide nocase
+        $enc2 = "-encodedcommand" ascii wide nocase
+        $b64  = "FromBase64String" ascii wide nocase
+        $down = "DownloadString" ascii wide nocase
+        $iex  = "Invoke-Expression" ascii wide nocase
+        $byp  = "-ExecutionPolicy Bypass" ascii wide nocase
+        $re_b64 = /[A-Za-z0-9+\/]{80,}={0,2}/
+
+    condition:
+        ($ps1 or $ps2) and (
+            ($enc1 or $enc2)
+            or ($b64 and ($down or $iex))
+            or ($byp and $re_b64)
+        )
+}

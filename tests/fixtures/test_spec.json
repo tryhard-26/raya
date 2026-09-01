@@ -1,0 +1,24 @@
+{
+  "name": "Raya Core Rule Verification Suite",
+  "rules_path": "../../rules",
+  "cases": [
+    {
+      "rule": "process_injection",
+      "positive": [
+        "sample_injection.exe"
+      ],
+      "negative": [
+        "clean_application.exe"
+      ]
+    },
+    {
+      "rule": "powershell_obfuscated_loader",
+      "positive": [
+        "powershell_loader.ps1"
+      ],
+      "negative": [
+        "clean_script.ps1"
+      ]
+    }
+  ]
+}

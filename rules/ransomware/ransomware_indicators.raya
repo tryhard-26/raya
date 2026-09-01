@@ -1,0 +1,23 @@
+rule ransomware_behavior_indicators : windows ransomware {
+    meta:
+        author = "Raya Research Team"
+        description = "Detects characteristic shadow-copy deletion, ransom notes, and bulk encryption activity"
+        severity = "critical"
+        technique = "T1486"
+        reference = "https://attack.mitre.org/techniques/T1486/"
+
+    strings:
+        $vss = "vssadmin.exe Delete Shadows" ascii wide nocase
+        $wmic = "shadowcopy delete" ascii wide nocase
+        $bcd1 = "bcdedit /set {default} bootstatuspolicy ignoreallfailures" ascii wide nocase
+        $bcd2 = "bcdedit /set {default} recoveryenabled No" ascii wide nocase
+        $note1 = "your personal files are encrypted" ascii wide nocase
+        $note2 = "all your files have been encrypted" ascii wide nocase
+        $note3 = "restore-my-files.txt" ascii wide nocase
+        $wbadmin = "wbadmin delete catalog" ascii wide nocase
+
+    condition:
+        ($vss and ($bcd1 or $bcd2 or $wmic))
+        or ($note1 or $note2 or $note3)
+        or ($wbadmin and $vss)
+}

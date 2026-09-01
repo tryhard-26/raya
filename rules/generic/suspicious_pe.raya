@@ -1,0 +1,15 @@
+rule suspicious_pe_characteristics : windows generic {
+    meta:
+        author = "Raya Research Team"
+        description = "Identifies structural anomalies such as RWX sections or anomalous section counts"
+        severity = "medium"
+        technique = "T1036"
+        reference = "https://attack.mitre.org/techniques/T1036/"
+
+    condition:
+        pe.is_pe and (
+            pe.has_rwx
+            or pe.number_of_sections > 12
+            or (pe.section(".text").entropy > 7.3 and pe.section(".text").raw_size > 4096)
+        )
+}

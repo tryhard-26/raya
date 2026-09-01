@@ -1,0 +1,23 @@
+rule packed_pe_indicators : windows packer obfuscation {
+    meta:
+        author = "Raya Research Team"
+        description = "Identifies indicators of runtime packing, compressed sections, or high-entropy executable code"
+        severity = "medium"
+        technique = "T1027.002"
+        reference = "https://attack.mitre.org/techniques/T1027/002/"
+
+    strings:
+        $upx0 = "UPX0" ascii
+        $upx1 = "UPX1" ascii
+        $aspack = ".aspack" ascii
+        $mpress = ".mpress" ascii
+        $stub = { 60 BE ?? ?? ?? ?? 8D BE ?? ?? ?? ?? 57 }
+
+    condition:
+        $stub
+        or ($upx0 and $upx1)
+        or $aspack
+        or $mpress
+        or (pe.is_pe and (pe.section(".text").entropy > 7.4 or pe.section("UPX1").entropy > 7.0))
+        or (pe.is_pe and pe.has_rwx)
+}

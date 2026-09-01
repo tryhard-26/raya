@@ -1,0 +1,19 @@
+rule c2_network_beaconing : windows networking c2 {
+    meta:
+        author = "Raya Research Team"
+        description = "Detects suspicious command and control communication patterns and networking API usage"
+        severity = "high"
+        technique = "T1071.001"
+        reference = "https://attack.mitre.org/techniques/T1071/001/"
+
+    strings:
+        $http_post = "POST /api/v1/beacon" ascii nocase
+        $ua1       = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) RayaC2Test" ascii
+        $sock_api1 = "InternetOpenUrl" ascii wide
+        $sock_api2 = "HttpSendRequest" ascii wide
+        $sock_api3 = "WSAConnect" ascii wide
+
+    condition:
+        ($http_post or $ua1)
+        or (2 of ($sock_api1, $sock_api2, $sock_api3) and pe.is_pe)
+}
