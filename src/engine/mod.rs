@@ -24,6 +24,12 @@ pub struct Engine {
     pub rules: Vec<CompiledRule>,
 }
 
+impl Default for Engine {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Engine {
     pub fn new() -> Self {
         Self { rules: Vec::new() }

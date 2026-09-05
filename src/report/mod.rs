@@ -67,11 +67,11 @@ impl ScanResult {
 
         for m in &self.matches {
             let sev_tag = match m.severity {
-                Severity::Critical => format!("[CRITICAL]").on_red().white().bold(),
-                Severity::High => format!("[HIGH]").red().bold(),
-                Severity::Medium => format!("[MEDIUM]").yellow().bold(),
-                Severity::Low => format!("[LOW]").blue().bold(),
-                Severity::Info => format!("[INFO]").cyan().bold(),
+                Severity::Critical => "[CRITICAL]".on_red().white().bold(),
+                Severity::High => "[HIGH]".red().bold(),
+                Severity::Medium => "[MEDIUM]".yellow().bold(),
+                Severity::Low => "[LOW]".blue().bold(),
+                Severity::Info => "[INFO]".cyan().bold(),
             };
 
             let tags_str = if !m.tags.is_empty() {

@@ -68,7 +68,7 @@ fn test_cli_scan_json_output() {
     let parsed: serde_json::Value = serde_json::from_str(&stdout)
         .expect("Scan output should be valid JSON");
     assert_eq!(parsed["file_type"], "PE32+");
-    assert!(parsed["matches"].as_array().unwrap().len() >= 1);
+    assert!(!parsed["matches"].as_array().unwrap().is_empty());
 }
 
 #[test]

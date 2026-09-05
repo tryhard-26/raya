@@ -71,8 +71,8 @@ impl<'a, 'b> Evaluator<'a, 'b> {
                 EvalValue::Bool(false)
             }
             Expr::StringCount(id) => {
-                let lookup_id = if id.starts_with('#') {
-                    format!("${}", &id[1..])
+                let lookup_id = if let Some(stripped) = id.strip_prefix('#') {
+                    format!("${}", stripped)
                 } else if !id.starts_with('$') {
                     format!("${}", id)
                 } else {
@@ -87,8 +87,8 @@ impl<'a, 'b> Evaluator<'a, 'b> {
                 EvalValue::Int(count as i64)
             }
             Expr::StringOffset(id) => {
-                let lookup_id = if id.starts_with('@') {
-                    format!("${}", &id[1..])
+                let lookup_id = if let Some(stripped) = id.strip_prefix('@') {
+                    format!("${}", stripped)
                 } else if !id.starts_with('$') {
                     format!("${}", id)
                 } else {
@@ -450,15 +450,12 @@ impl<'a, 'b> Evaluator<'a, 'b> {
                 }
 
                 if let Some(sub) = sub_property {
-                    match property {
-                        "section" => {
-                            if let Some(pe) = &self.context.binary.pe {
-                                if let Some(sec) = pe.get_section(sub) {
-                                    return EvalValue::PeSec(sec.clone());
-                                }
+                    if property == "section" {
+                        if let Some(pe) = &self.context.binary.pe {
+                            if let Some(sec) = pe.get_section(sub) {
+                                return EvalValue::PeSec(sec.clone());
                             }
                         }
-                        _ => {}
                     }
                 }
 

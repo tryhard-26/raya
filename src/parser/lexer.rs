@@ -369,17 +369,17 @@ impl Lexer {
     }
 
     fn is_regex_context(&self) -> bool {
-        match &self.prev_token_kind {
+        matches!(
+            &self.prev_token_kind,
             Some(
                 TokenKind::Equals
-                | TokenKind::OpenParen
-                | TokenKind::Comma
-                | TokenKind::And
-                | TokenKind::Or
-                | TokenKind::Not,
-            ) => true,
-            _ => false,
-        }
+                    | TokenKind::OpenParen
+                    | TokenKind::Comma
+                    | TokenKind::And
+                    | TokenKind::Or
+                    | TokenKind::Not
+            )
+        )
     }
 
     fn lex_prefixed_ident<F>(&mut self, constructor: F) -> Result<TokenKind, LexError>
@@ -473,7 +473,7 @@ impl Lexer {
         while let Some(ch) = self.peek() {
             if ch.is_ascii_digit() {
                 s.push(self.advance().unwrap());
-            } else if ch == '.' && !is_float && self.peek_ahead(1).map_or(false, |c| c.is_ascii_digit()) {
+            } else if ch == '.' && !is_float && self.peek_ahead(1).is_some_and(|c| c.is_ascii_digit()) {
                 is_float = true;
                 s.push(self.advance().unwrap());
             } else {

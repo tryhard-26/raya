@@ -1,4 +1,5 @@
 pub mod lexer;
+#[allow(clippy::module_inception)]
 pub mod parser;
 
 pub use lexer::{LexError, Lexer, Token, TokenKind};

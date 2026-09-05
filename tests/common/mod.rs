@@ -1,4 +1,4 @@
-/// Helper module for constructing deterministic synthetic PE and binary fixtures for tests.
+//! Helper module for constructing deterministic synthetic PE and binary fixtures for tests.
 
 pub fn build_mock_pe(
     sections: &[(&str, u32, &[u8])], // (name, characteristics, data)
@@ -46,7 +46,7 @@ pub fn build_mock_pe(
     for (i, (name, chars, sec_data)) in sections.iter().enumerate() {
         let entry_offset = sec_table_offset + (i * 40);
         let mut name_bytes = [0u8; 8];
-        let copy_len = name.as_bytes().len().min(8);
+        let copy_len = name.len().min(8);
         name_bytes[..copy_len].copy_from_slice(&name.as_bytes()[..copy_len]);
         pe[entry_offset..entry_offset + 8].copy_from_slice(&name_bytes);
 
