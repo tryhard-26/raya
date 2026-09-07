@@ -9,8 +9,8 @@ rule powershell_obfuscated_loader : windows execution loader {
     strings:
         $ps1 = "powershell" ascii wide nocase
         $ps2 = "pwsh" ascii wide nocase
-        $enc1 = "-enc" ascii wide nocase
-        $enc2 = "-encodedcommand" ascii wide nocase
+        $enc1 = "-enc " ascii wide nocase
+        $enc2 = "-encodedcommand " ascii wide nocase
         $b64  = "FromBase64String" ascii wide nocase
         $down = "DownloadString" ascii wide nocase
         $iex  = "Invoke-Expression" ascii wide nocase
@@ -19,8 +19,8 @@ rule powershell_obfuscated_loader : windows execution loader {
 
     condition:
         ($ps1 or $ps2) and (
-            ($enc1 or $enc2)
+            (($enc1 or $enc2) and ($byp or $re_b64))
             or ($b64 and ($down or $iex))
-            or ($byp and $re_b64)
+            or ($byp and $down)
         )
 }

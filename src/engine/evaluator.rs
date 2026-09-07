@@ -339,6 +339,37 @@ impl<'a, 'b> Evaluator<'a, 'b> {
                             return EvalValue::Bool(matched);
                         }
                     }
+                    "has_instruction" => {
+                        if let Some(EvalValue::Str(instr)) = evaluated_args.first() {
+                            let matched = pe.has_instruction(self.context.data, instr);
+                            if matched {
+                                self.context.record_evidence(MatchedEvidence::Custom(format!(
+                                    "Disassembly matched opcode: {}",
+                                    instr
+                                )));
+                            }
+                            return EvalValue::Bool(matched);
+                        }
+                    }
+                    "has_instruction_sequence" => {
+                        let seq: Vec<&str> = evaluated_args
+                            .iter()
+                            .filter_map(|a| match a {
+                                EvalValue::Str(s) => Some(s.as_str()),
+                                _ => None,
+                            })
+                            .collect();
+                        if !seq.is_empty() {
+                            let matched = pe.has_instruction_sequence(self.context.data, &seq);
+                            if matched {
+                                self.context.record_evidence(MatchedEvidence::Custom(format!(
+                                    "Disassembly matched opcode sequence: [{}]",
+                                    seq.join(" -> ")
+                                )));
+                            }
+                            return EvalValue::Bool(matched);
+                        }
+                    }
                     "section" => {
                         if let Some(EvalValue::Str(sec_name)) = evaluated_args.first() {
                             if let Some(sec) = pe.get_section(sec_name) {

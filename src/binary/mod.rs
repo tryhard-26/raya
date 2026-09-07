@@ -1,3 +1,4 @@
+pub mod disasm;
 pub mod elf;
 pub mod format;
 pub mod pe;

@@ -96,6 +96,40 @@ impl PeInfo {
             false
         }
     }
+
+    pub fn has_instruction_sequence(&self, data: &[u8], seq: &[&str]) -> bool {
+        let bitness = if self.is_pe32_plus { 64 } else { 32 };
+        for sec in &self.sections {
+            if sec.is_executable && sec.raw_size > 0 {
+                let start = sec.raw_offset as usize;
+                let end = (start + sec.raw_size as usize).min(data.len());
+                if start < data.len()
+                    && end > start
+                    && crate::binary::disasm::has_mnemonic_sequence(&data[start..end], bitness, seq)
+                {
+                    return true;
+                }
+            }
+        }
+        false
+    }
+
+    pub fn has_instruction(&self, data: &[u8], instr: &str) -> bool {
+        let bitness = if self.is_pe32_plus { 64 } else { 32 };
+        for sec in &self.sections {
+            if sec.is_executable && sec.raw_size > 0 {
+                let start = sec.raw_offset as usize;
+                let end = (start + sec.raw_size as usize).min(data.len());
+                if start < data.len()
+                    && end > start
+                    && crate::binary::disasm::has_mnemonic(&data[start..end], bitness, instr)
+                {
+                    return true;
+                }
+            }
+        }
+        false
+    }
 }
 
 pub fn parse_pe(data: &[u8]) -> Option<PeInfo> {
