@@ -1,5 +1,17 @@
 [
   {
+    "sha256": "ed01ebfbc9eb5bbea545af4d01bf5f1071661840480439c6e5babe8e080e41aa",
+    "family": "WannaCry",
+    "source": "theZoo / MalwareBazaar",
+    "download_identifier": "Ransomware.WannaCry",
+    "file_type": "PE32",
+    "expected_detections": [
+      "ransomware_wannacry"
+    ],
+    "date_acquired": "2026-09-09",
+    "tags": ["ransomware", "dropper", "eternalblue"]
+  },
+  {
     "sha256": "8e4c19a9f24e3a479d23315a6b0c2a8f8d2b90623d6a3f5a2b1c8e9f0a1b2c3d",
     "family": "Emotet",
     "source": "MalwareBazaar",

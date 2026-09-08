@@ -16,9 +16,11 @@
 /bench_results/
 /test_reports/
 
-# Safety: Prevent accidental commits of live malware samples
+# Safety & Hygiene: Prevent large binaries and live malware in Git
 samples/malware/*
 !samples/malware/.gitkeep
+samples/benign/*
+!samples/benign/.gitkeep
 !samples/manifest.json
 *.infected
 *.malware

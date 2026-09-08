@@ -5,7 +5,7 @@ edition = "2021"
 authors = ["Raya Core Team"]
 description = "Rust-native malware detection and binary pattern-matching engine"
 readme = "README.md"
-license = "MIT OR Apache-2.0"
+license = "Apache-2.0"
 keywords = ["malware-analysis", "yara", "security", "pattern-matching", "pe-analysis"]
 categories = ["command-line-utilities", "development-tools::profiling"]
 

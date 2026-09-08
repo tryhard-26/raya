@@ -1,0 +1,20 @@
+rule ransomware_wannacry : windows ransomware {
+    meta:
+        author = "Raya Research Team"
+        description = "Detects WannaCry ransomware artifacts, command execution strings, and drop mechanisms"
+        severity = "critical"
+        technique = "T1486"
+        reference = "https://attack.mitre.org/software/S0366/"
+
+    strings:
+        $tasksche = "tasksche.exe" ascii wide nocase
+        $icacls   = "icacls . /grant Everyone:F" ascii wide nocase
+        $attrib   = "attrib +h ." ascii wide nocase
+        $magic_header = "WANACRY!" ascii
+        $wncry_ext = ".wncry" ascii wide nocase
+
+    condition:
+        ($tasksche and ($icacls or $attrib))
+        or $magic_header
+        or ($wncry_ext and pe.is_pe)
+}
