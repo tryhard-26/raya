@@ -10,6 +10,7 @@ repository = "https://github.com/tryhard-26/raya"
 homepage = "https://github.com/tryhard-26/raya"
 keywords = ["malware-analysis", "yara", "security", "pattern-matching", "pe-analysis"]
 categories = ["command-line-utilities", "development-tools::profiling"]
+exclude = ["raya.md", "Raya.md", "RAYA.md", "samples/malware/*", "bench_results/*", "test_reports/*"]
 
 [dependencies]
 clap = { version = "4.5", features = ["derive", "cargo"] }

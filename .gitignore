@@ -24,3 +24,9 @@ samples/benign/*
 !samples/manifest.json
 *.infected
 *.malware
+
+# Internal specifications & PRD
+[rR][aA][yY][aA].[mM][dD]
+raya.md
+Raya.md
+RAYA.md
