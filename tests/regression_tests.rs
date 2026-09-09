@@ -27,7 +27,10 @@ fn test_generate_fixtures() {
             (".text", 0x60000020, &injection_data), // Readable, Executable, Code
             (".data", 0xC0000040, b"Injection Payload Buffer Data"),
         ],
-        &[("kernel32.dll", &["VirtualAllocEx", "WriteProcessMemory", "CreateRemoteThread"])],
+        &[(
+            "kernel32.dll",
+            &["VirtualAllocEx", "WriteProcessMemory", "CreateRemoteThread"],
+        )],
     );
     fs::write(fixtures_dir.join("sample_injection.exe"), &injection_pe).unwrap();
 
@@ -53,7 +56,11 @@ fn test_generate_fixtures() {
             high_entropy_data.push(b);
         }
     }
-    fs::write(fixtures_dir.join("high_entropy_benign.dat"), &high_entropy_data).unwrap();
+    fs::write(
+        fixtures_dir.join("high_entropy_benign.dat"),
+        &high_entropy_data,
+    )
+    .unwrap();
 
     // 4. Build wannacry_sample.exe (PE32)
     let mut wannacry_data = Vec::new();
@@ -67,7 +74,11 @@ fn test_generate_fixtures() {
     let wannacry_pe = build_mock_pe32(
         &[
             (".text", 0x60000020, &wannacry_data),
-            (".rsrc", 0x40000040, b"WannaCry Encrypted Resource Archive WANACRY!"),
+            (
+                ".rsrc",
+                0x40000040,
+                b"WannaCry Encrypted Resource Archive WANACRY!",
+            ),
         ],
         &[],
     );
@@ -102,7 +113,11 @@ fn test_generate_fixtures() {
     let cs_pe = build_mock_pe(
         &[
             (".text", 0x60000020, &cs_data),
-            (".rdata", 0x40000040, b"Cobalt Strike Beacon Configuration Block"),
+            (
+                ".rdata",
+                0x40000040,
+                b"Cobalt Strike Beacon Configuration Block",
+            ),
         ],
         &[("wininet.dll", &["InternetOpenUrl", "HttpSendRequest"])],
     );
@@ -118,7 +133,11 @@ fn test_generate_fixtures() {
     let redline_pe = build_mock_pe32(
         &[
             (".text", 0x60000020, &redline_data),
-            (".data", 0xC0000040, b"RedLine Credential Harvester String Table"),
+            (
+                ".data",
+                0xC0000040,
+                b"RedLine Credential Harvester String Table",
+            ),
         ],
         &[("advapi32.dll", &["RegSetValueExA"])],
     );
@@ -214,7 +233,10 @@ fn test_benign_high_entropy_file_does_not_trigger_process_injection() {
     }
 
     let result = engine.scan_bytes(&random_data, "benign_archive.zip");
-    assert!(!result.has_matches(), "Benign high-entropy data should not trigger injection rule");
+    assert!(
+        !result.has_matches(),
+        "Benign high-entropy data should not trigger injection rule"
+    );
 }
 
 #[test]
@@ -227,7 +249,10 @@ fn test_real_malware_detections() {
     let wc_engine = Engine::compile_rules(wc_rules).unwrap();
     let wc_data = fs::read("tests/fixtures/wannacry_sample.exe").unwrap();
     let wc_res = wc_engine.scan_bytes(&wc_data, "wannacry_sample.exe");
-    assert!(wc_res.has_matches(), "WannaCry sample should trigger ransomware_wannacry rule");
+    assert!(
+        wc_res.has_matches(),
+        "WannaCry sample should trigger ransomware_wannacry rule"
+    );
     assert_eq!(wc_res.matches[0].rule, "ransomware_wannacry");
 
     // 2. LockBit 3.0
@@ -235,7 +260,10 @@ fn test_real_malware_detections() {
     let lb_engine = Engine::compile_rules(lb_rules).unwrap();
     let lb_data = fs::read("tests/fixtures/lockbit_sample.exe").unwrap();
     let lb_res = lb_engine.scan_bytes(&lb_data, "lockbit_sample.exe");
-    assert!(lb_res.has_matches(), "LockBit sample should trigger ransomware_behavior_indicators");
+    assert!(
+        lb_res.has_matches(),
+        "LockBit sample should trigger ransomware_behavior_indicators"
+    );
     assert_eq!(lb_res.matches[0].rule, "ransomware_behavior_indicators");
 
     // 3. Cobalt Strike C2 Beacon
@@ -243,7 +271,10 @@ fn test_real_malware_detections() {
     let cs_engine = Engine::compile_rules(cs_rules).unwrap();
     let cs_data = fs::read("tests/fixtures/cobalt_strike_beacon.exe").unwrap();
     let cs_res = cs_engine.scan_bytes(&cs_data, "cobalt_strike_beacon.exe");
-    assert!(cs_res.has_matches(), "Cobalt Strike sample should trigger c2_network_beaconing");
+    assert!(
+        cs_res.has_matches(),
+        "Cobalt Strike sample should trigger c2_network_beaconing"
+    );
     assert_eq!(cs_res.matches[0].rule, "c2_network_beaconing");
 
     // 4. RedLine Stealer
@@ -251,7 +282,10 @@ fn test_real_malware_detections() {
     let rl_engine = Engine::compile_rules(rl_rules).unwrap();
     let rl_data = fs::read("tests/fixtures/redline_stealer.exe").unwrap();
     let rl_res = rl_engine.scan_bytes(&rl_data, "redline_stealer.exe");
-    assert!(rl_res.has_matches(), "RedLine Stealer should trigger registry_run_keys_persistence");
+    assert!(
+        rl_res.has_matches(),
+        "RedLine Stealer should trigger registry_run_keys_persistence"
+    );
     assert_eq!(rl_res.matches[0].rule, "registry_run_keys_persistence");
 
     // 5. UPX Packed Malware
@@ -259,7 +293,10 @@ fn test_real_malware_detections() {
     let upx_engine = Engine::compile_rules(upx_rules).unwrap();
     let upx_data = fs::read("tests/fixtures/upx_packed_sample.exe").unwrap();
     let upx_res = upx_engine.scan_bytes(&upx_data, "upx_packed_sample.exe");
-    assert!(upx_res.has_matches(), "UPX sample should trigger packed_pe_indicators");
+    assert!(
+        upx_res.has_matches(),
+        "UPX sample should trigger packed_pe_indicators"
+    );
     assert_eq!(upx_res.matches[0].rule, "packed_pe_indicators");
 
     // 6. Mirai IoT Botnet (ELF)
@@ -267,16 +304,30 @@ fn test_real_malware_detections() {
     let mirai_engine = Engine::compile_rules(mirai_rules).unwrap();
     let mirai_data = fs::read("tests/fixtures/mirai_sample.elf").unwrap();
     let mirai_res = mirai_engine.scan_bytes(&mirai_data, "mirai_sample.elf");
-    assert!(mirai_res.has_matches(), "Mirai sample should trigger mirai_botnet rule");
+    assert!(
+        mirai_res.has_matches(),
+        "Mirai sample should trigger mirai_botnet rule"
+    );
     assert_eq!(mirai_res.matches[0].rule, "mirai_botnet");
 
     // 7. Clean binary baseline
     let clean_data = fs::read("tests/fixtures/clean_application.exe").unwrap();
-    assert!(!wc_engine.scan_bytes(&clean_data, "clean_app.exe").has_matches());
-    assert!(!lb_engine.scan_bytes(&clean_data, "clean_app.exe").has_matches());
-    assert!(!cs_engine.scan_bytes(&clean_data, "clean_app.exe").has_matches());
-    assert!(!rl_engine.scan_bytes(&clean_data, "clean_app.exe").has_matches());
-    assert!(!upx_engine.scan_bytes(&clean_data, "clean_app.exe").has_matches());
-    assert!(!mirai_engine.scan_bytes(&clean_data, "clean_app.exe").has_matches());
+    assert!(!wc_engine
+        .scan_bytes(&clean_data, "clean_app.exe")
+        .has_matches());
+    assert!(!lb_engine
+        .scan_bytes(&clean_data, "clean_app.exe")
+        .has_matches());
+    assert!(!cs_engine
+        .scan_bytes(&clean_data, "clean_app.exe")
+        .has_matches());
+    assert!(!rl_engine
+        .scan_bytes(&clean_data, "clean_app.exe")
+        .has_matches());
+    assert!(!upx_engine
+        .scan_bytes(&clean_data, "clean_app.exe")
+        .has_matches());
+    assert!(!mirai_engine
+        .scan_bytes(&clean_data, "clean_app.exe")
+        .has_matches());
 }
-

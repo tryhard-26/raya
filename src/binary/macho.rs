@@ -109,12 +109,14 @@ pub fn parse_macho(data: &[u8]) -> Option<MachoInfo> {
         0xCAFEBABE | 0xBEBAFECA => parse_fat_macho(data, magic == 0xCAFEBABE),
         // 64-bit Mach-O (Little / Big Endian)
         0xFEEDFACF | 0xCFFAEDFE => {
-            let is_little_endian = magic == 0xCFFAEDFE || (magic == 0xFEEDFACF && cfg!(target_endian = "little"));
+            let is_little_endian =
+                magic == 0xCFFAEDFE || (magic == 0xFEEDFACF && cfg!(target_endian = "little"));
             parse_single_macho(data, true, is_little_endian)
         }
         // 32-bit Mach-O (Little / Big Endian)
         0xFEEDFACE | 0xCEFAEDFE => {
-            let is_little_endian = magic == 0xCEFAEDFE || (magic == 0xFEEDFACE && cfg!(target_endian = "little"));
+            let is_little_endian =
+                magic == 0xCEFAEDFE || (magic == 0xFEEDFACE && cfg!(target_endian = "little"));
             parse_single_macho(data, false, is_little_endian)
         }
         _ => None,
@@ -128,7 +130,12 @@ fn parse_fat_macho(data: &[u8], is_big_endian: bool) -> Option<MachoInfo> {
 
     let read_u32 = |offset: usize| -> Option<u32> {
         if offset + 4 <= data.len() {
-            let bytes = [data[offset], data[offset + 1], data[offset + 2], data[offset + 3]];
+            let bytes = [
+                data[offset],
+                data[offset + 1],
+                data[offset + 2],
+                data[offset + 3],
+            ];
             Some(if is_big_endian {
                 u32::from_be_bytes(bytes)
             } else {
@@ -191,7 +198,12 @@ fn parse_single_macho(data: &[u8], is_64: bool, is_little_endian: bool) -> Optio
 
     let read_u32 = |offset: usize| -> Option<u32> {
         if offset + 4 <= data.len() {
-            let bytes = [data[offset], data[offset + 1], data[offset + 2], data[offset + 3]];
+            let bytes = [
+                data[offset],
+                data[offset + 1],
+                data[offset + 2],
+                data[offset + 3],
+            ];
             Some(if is_little_endian {
                 u32::from_le_bytes(bytes)
             } else {
@@ -260,7 +272,8 @@ fn parse_single_macho(data: &[u8], is_64: bool, is_little_endian: bool) -> Optio
                     let mut sect_offset = cmd_offset + 72;
 
                     for _ in 0..nsects {
-                        if sect_offset + 80 > cmd_offset + cmdsize || sect_offset + 80 > data.len() {
+                        if sect_offset + 80 > cmd_offset + cmdsize || sect_offset + 80 > data.len()
+                        {
                             break;
                         }
 
@@ -334,7 +347,8 @@ fn parse_single_macho(data: &[u8], is_64: bool, is_little_endian: bool) -> Optio
                     let mut sect_offset = cmd_offset + 56;
 
                     for _ in 0..nsects {
-                        if sect_offset + 68 > cmd_offset + cmdsize || sect_offset + 68 > data.len() {
+                        if sect_offset + 68 > cmd_offset + cmdsize || sect_offset + 68 > data.len()
+                        {
                             break;
                         }
 

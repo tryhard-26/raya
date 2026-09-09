@@ -1,7 +1,9 @@
 use std::collections::HashMap;
 use std::fmt;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
+)]
 #[serde(rename_all = "lowercase")]
 pub enum Severity {
     Info,
@@ -66,9 +68,9 @@ impl fmt::Display for MetaValue {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum HexToken {
     Exact(u8),
-    Wildcard,          // ??
-    HighNibble(u8),    // e.g. 4?
-    LowNibble(u8),     // e.g. ?8
+    Wildcard,       // ??
+    HighNibble(u8), // e.g. 4?
+    LowNibble(u8),  // e.g. ?8
 }
 
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]

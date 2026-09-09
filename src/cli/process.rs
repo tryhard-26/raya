@@ -133,42 +133,31 @@ fn scan_generic_process(
     emit_results(&[], json, quiet, format)
 }
 
-pub fn emit_results(
-    results: &[ScanResult],
-    json: bool,
-    quiet: bool,
-    format: Option<&str>,
-) -> i32 {
+pub fn emit_results(results: &[ScanResult], json: bool, quiet: bool, format: Option<&str>) -> i32 {
     let fmt = format.unwrap_or(if json { "json" } else { "text" });
 
     match fmt {
-        "json" => {
-            match serde_json::to_string_pretty(results) {
-                Ok(j) => println!("{}", j),
-                Err(e) => {
-                    eprintln!("Failed to serialize JSON: {}", e);
-                    return 2;
-                }
+        "json" => match serde_json::to_string_pretty(results) {
+            Ok(j) => println!("{}", j),
+            Err(e) => {
+                eprintln!("Failed to serialize JSON: {}", e);
+                return 2;
             }
-        }
-        "sarif" => {
-            match crate::report::to_sarif(results) {
-                Ok(s) => println!("{}", s),
-                Err(e) => {
-                    eprintln!("Failed to serialize SARIF: {}", e);
-                    return 2;
-                }
+        },
+        "sarif" => match crate::report::to_sarif(results) {
+            Ok(s) => println!("{}", s),
+            Err(e) => {
+                eprintln!("Failed to serialize SARIF: {}", e);
+                return 2;
             }
-        }
-        "stix" => {
-            match crate::report::to_stix(results) {
-                Ok(s) => println!("{}", s),
-                Err(e) => {
-                    eprintln!("Failed to serialize STIX: {}", e);
-                    return 2;
-                }
+        },
+        "stix" => match crate::report::to_stix(results) {
+            Ok(s) => println!("{}", s),
+            Err(e) => {
+                eprintln!("Failed to serialize STIX: {}", e);
+                return 2;
             }
-        }
+        },
         _ => {
             if quiet {
                 for r in results {
@@ -177,7 +166,12 @@ pub fn emit_results(
                     }
                 }
             } else if results.is_empty() {
-                println!("{}", "✓ Process memory scan complete: 0 matches (clean)".green().bold());
+                println!(
+                    "{}",
+                    "✓ Process memory scan complete: 0 matches (clean)"
+                        .green()
+                        .bold()
+                );
             } else {
                 for r in results {
                     print!("{}", r.render_terminal());

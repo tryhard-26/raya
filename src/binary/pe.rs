@@ -67,16 +67,21 @@ impl PeInfo {
     }
 
     pub fn has_rich_comp_id(&self, target_comp_id: u16) -> bool {
-        self.rich_entries.iter().any(|e| e.comp_id == target_comp_id)
+        self.rich_entries
+            .iter()
+            .any(|e| e.comp_id == target_comp_id)
     }
 
     pub fn has_rich_product_id(&self, target_product_id: u16) -> bool {
-        self.rich_entries.iter().any(|e| e.product_id == target_product_id)
+        self.rich_entries
+            .iter()
+            .any(|e| e.product_id == target_product_id)
     }
 
     pub fn get_section(&self, name: &str) -> Option<&PeSection> {
         self.sections.iter().find(|s| {
-            s.name.eq_ignore_ascii_case(name) || s.name.trim_end_matches('\0').eq_ignore_ascii_case(name)
+            s.name.eq_ignore_ascii_case(name)
+                || s.name.trim_end_matches('\0').eq_ignore_ascii_case(name)
         })
     }
 
@@ -114,7 +119,8 @@ impl PeInfo {
     pub fn entry_point_in_section(&self, name: &str) -> bool {
         if let Some(sec) = self.get_section(name) {
             let ep = self.entry_point as u32;
-            ep >= sec.virtual_address && ep < (sec.virtual_address + sec.virtual_size.max(sec.raw_size))
+            ep >= sec.virtual_address
+                && ep < (sec.virtual_address + sec.virtual_size.max(sec.raw_size))
         } else {
             false
         }
@@ -168,7 +174,8 @@ pub fn parse_pe(data: &[u8]) -> Option<PeInfo> {
     let coff_offset = e_lfanew + 4;
     let machine = u16::from_le_bytes([data[coff_offset], data[coff_offset + 1]]);
     let num_sections = u16::from_le_bytes([data[coff_offset + 2], data[coff_offset + 3]]) as usize;
-    let size_of_opt_header = u16::from_le_bytes([data[coff_offset + 16], data[coff_offset + 17]]) as usize;
+    let size_of_opt_header =
+        u16::from_le_bytes([data[coff_offset + 16], data[coff_offset + 17]]) as usize;
     let characteristics = u16::from_le_bytes([data[coff_offset + 18], data[coff_offset + 19]]);
     let is_dll = (characteristics & 0x2000) != 0;
 
@@ -258,23 +265,24 @@ pub fn parse_pe(data: &[u8]) -> Option<PeInfo> {
     };
 
     // Security Directory (Index 4 in Data Directories, each entry 8 bytes: offset/RVA + size)
-    let (sec_dir_offset, sec_dir_size) = if data_dirs_offset + 32 + 8 <= opt_offset + size_of_opt_header {
-        let raw_off = u32::from_le_bytes([
-            data[data_dirs_offset + 32],
-            data[data_dirs_offset + 33],
-            data[data_dirs_offset + 34],
-            data[data_dirs_offset + 35],
-        ]);
-        let size = u32::from_le_bytes([
-            data[data_dirs_offset + 36],
-            data[data_dirs_offset + 37],
-            data[data_dirs_offset + 38],
-            data[data_dirs_offset + 39],
-        ]);
-        (raw_off, size)
-    } else {
-        (0, 0)
-    };
+    let (sec_dir_offset, sec_dir_size) =
+        if data_dirs_offset + 32 + 8 <= opt_offset + size_of_opt_header {
+            let raw_off = u32::from_le_bytes([
+                data[data_dirs_offset + 32],
+                data[data_dirs_offset + 33],
+                data[data_dirs_offset + 34],
+                data[data_dirs_offset + 35],
+            ]);
+            let size = u32::from_le_bytes([
+                data[data_dirs_offset + 36],
+                data[data_dirs_offset + 37],
+                data[data_dirs_offset + 38],
+                data[data_dirs_offset + 39],
+            ]);
+            (raw_off, size)
+        } else {
+            (0, 0)
+        };
 
     let is_signed = sec_dir_size > 0
         && sec_dir_offset > 0
@@ -457,7 +465,8 @@ pub fn parse_pe(data: &[u8]) -> Option<PeInfo> {
                                         let hint_name_rva = (thunk_val & 0x7FFF_FFFF) as u32;
                                         if let Some(hn_offset) = rva_to_offset(hint_name_rva) {
                                             // Skip 2-byte hint
-                                            if let Some(fn_name) = read_ascii_string(hn_offset + 2) {
+                                            if let Some(fn_name) = read_ascii_string(hn_offset + 2)
+                                            {
                                                 functions.push(fn_name);
                                             }
                                         }
@@ -481,7 +490,8 @@ pub fn parse_pe(data: &[u8]) -> Option<PeInfo> {
                                     } else {
                                         let hint_name_rva = thunk_val & 0x7FFF_FFFF;
                                         if let Some(hn_offset) = rva_to_offset(hint_name_rva) {
-                                            if let Some(fn_name) = read_ascii_string(hn_offset + 2) {
+                                            if let Some(fn_name) = read_ascii_string(hn_offset + 2)
+                                            {
                                                 functions.push(fn_name);
                                             }
                                         }
@@ -621,8 +631,11 @@ fn parse_rich_header(data: &[u8], e_lfanew: usize) -> (bool, Vec<RichEntry>) {
     let mut entries = Vec::new();
     let mut off = start_entries;
     while off + 8 <= rich_off {
-        let dword1 = u32::from_le_bytes([data[off], data[off + 1], data[off + 2], data[off + 3]]) ^ xor_key;
-        let dword2 = u32::from_le_bytes([data[off + 4], data[off + 5], data[off + 6], data[off + 7]]) ^ xor_key;
+        let dword1 =
+            u32::from_le_bytes([data[off], data[off + 1], data[off + 2], data[off + 3]]) ^ xor_key;
+        let dword2 =
+            u32::from_le_bytes([data[off + 4], data[off + 5], data[off + 6], data[off + 7]])
+                ^ xor_key;
 
         let comp_id = (dword1 & 0xFFFF) as u16;
         let product_id = ((dword1 >> 16) & 0xFFFF) as u16;

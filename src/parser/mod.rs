@@ -17,7 +17,11 @@ pub fn parse_rules_from_str(source: &str) -> Result<Vec<Rule>, ParseError> {
 pub fn parse_rules_from_file<P: AsRef<Path>>(path: P) -> Result<Vec<Rule>, ParseError> {
     let content = fs::read_to_string(path.as_ref()).map_err(|e| ParseError {
         location: Default::default(),
-        message: format!("Failed to read rule file '{}': {}", path.as_ref().display(), e),
+        message: format!(
+            "Failed to read rule file '{}': {}",
+            path.as_ref().display(),
+            e
+        ),
     })?;
     parse_rules_from_str(&content)
 }

@@ -57,7 +57,8 @@ impl fmt::Display for BinaryFormat {
 pub fn detect_format(data: &[u8]) -> BinaryFormat {
     // Check PE
     if data.len() >= 0x40 && data[0] == b'M' && data[1] == b'Z' {
-        let e_lfanew = u32::from_le_bytes([data[0x3C], data[0x3D], data[0x3E], data[0x3F]]) as usize;
+        let e_lfanew =
+            u32::from_le_bytes([data[0x3C], data[0x3D], data[0x3E], data[0x3F]]) as usize;
         if e_lfanew + 24 <= data.len() && &data[e_lfanew..e_lfanew + 4] == b"PE\0\0" {
             let magic_offset = e_lfanew + 24;
             if magic_offset + 2 <= data.len() {

@@ -232,14 +232,8 @@ mod tests {
             hashes.sha256,
             "d7a8fbb307d7809469ca9abcb0082e4f8d5651e46d3cdb762d02d0bf37c9e592"
         );
-        assert_eq!(
-            hashes.sha1,
-            "2fd4e1c67a2d28fced849ee1bb76e7391b93eb12"
-        );
-        assert_eq!(
-            hashes.md5,
-            "9e107d9d372bb6826bd81d3542a419d6"
-        );
+        assert_eq!(hashes.sha1, "2fd4e1c67a2d28fced849ee1bb76e7391b93eb12");
+        assert_eq!(hashes.md5, "9e107d9d372bb6826bd81d3542a419d6");
         assert!(hashes.ssdeep.is_some());
     }
 
@@ -255,7 +249,11 @@ mod tests {
         let sig2 = compute_ssdeep(&sample2);
 
         let score = ssdeep_compare(&sig1, &sig2);
-        assert!(score >= 80, "Expected high similarity score between variants, got {}", score);
+        assert!(
+            score >= 80,
+            "Expected high similarity score between variants, got {}",
+            score
+        );
 
         let distant = b"A completely different payload with totally distinct structure and byte distribution completely unrelated.";
         let sig3 = compute_ssdeep(distant);

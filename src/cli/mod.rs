@@ -138,9 +138,7 @@ pub fn run_cli() -> i32 {
         Commands::Compile { rules, output } => {
             compile::run_compile(compile::CompileArgs { rules, output })
         }
-        Commands::Check { path, verbose } => {
-            check::run_check(check::CheckArgs { path, verbose })
-        }
+        Commands::Check { path, verbose } => check::run_check(check::CheckArgs { path, verbose }),
         Commands::Test { spec, json } => test::run_test(test::TestArgs { spec, json }),
         Commands::Bench {
             target,

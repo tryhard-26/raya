@@ -32,7 +32,12 @@ fn test_cli_check_rules() {
 #[test]
 fn test_cli_scan_detection_exit_code() {
     let output = Command::new(get_bin_path())
-        .args(["scan", "tests/fixtures/sample_injection.exe", "--rules", "rules/"])
+        .args([
+            "scan",
+            "tests/fixtures/sample_injection.exe",
+            "--rules",
+            "rules/",
+        ])
         .output()
         .expect("Failed to execute raya scan");
 
@@ -46,7 +51,12 @@ fn test_cli_scan_detection_exit_code() {
 #[test]
 fn test_cli_scan_clean_exit_code() {
     let output = Command::new(get_bin_path())
-        .args(["scan", "tests/fixtures/clean_application.exe", "--rules", "rules/"])
+        .args([
+            "scan",
+            "tests/fixtures/clean_application.exe",
+            "--rules",
+            "rules/",
+        ])
         .output()
         .expect("Failed to execute raya scan");
 
@@ -59,14 +69,20 @@ fn test_cli_scan_clean_exit_code() {
 #[test]
 fn test_cli_scan_json_output() {
     let output = Command::new(get_bin_path())
-        .args(["scan", "tests/fixtures/sample_injection.exe", "--rules", "rules/", "--json"])
+        .args([
+            "scan",
+            "tests/fixtures/sample_injection.exe",
+            "--rules",
+            "rules/",
+            "--json",
+        ])
         .output()
         .expect("Failed to execute raya scan --json");
 
     assert_eq!(output.status.code(), Some(1));
     let stdout = String::from_utf8_lossy(&output.stdout);
-    let parsed: serde_json::Value = serde_json::from_str(&stdout)
-        .expect("Scan output should be valid JSON");
+    let parsed: serde_json::Value =
+        serde_json::from_str(&stdout).expect("Scan output should be valid JSON");
     assert_eq!(parsed["file_type"], "PE32+");
     assert!(!parsed["matches"].as_array().unwrap().is_empty());
 }

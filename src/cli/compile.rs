@@ -112,7 +112,10 @@ pub fn load_or_compile_rules(rules_path: &Path) -> Result<Engine, String> {
             }
         }
     } else {
-        return Err(format!("Rules path '{}' does not exist", rules_path.display()));
+        return Err(format!(
+            "Rules path '{}' does not exist",
+            rules_path.display()
+        ));
     }
 
     let mut parsed_rules = Vec::new();
@@ -122,6 +125,5 @@ pub fn load_or_compile_rules(rules_path: &Path) -> Result<Engine, String> {
         parsed_rules.extend(rules);
     }
 
-    Engine::compile_rules(parsed_rules)
-        .map_err(|e| format!("Failed to compile rules: {}", e))
+    Engine::compile_rules(parsed_rules).map_err(|e| format!("Failed to compile rules: {}", e))
 }

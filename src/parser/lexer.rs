@@ -24,39 +24,36 @@ pub enum TokenKind {
 
     // Identifiers
     Ident(String),
-    StringIdent(String),      // $id
-    StringCountIdent(String), // #id
-    StringOffsetIdent(String),// @id
+    StringIdent(String),       // $id
+    StringCountIdent(String),  // #id
+    StringOffsetIdent(String), // @id
 
     // Literals
     StringLit(String),
     IntLit(i64),
     FloatLit(f64),
     HexPattern(Vec<HexToken>),
-    RegexPattern {
-        pattern: String,
-        nocase: bool,
-    },
+    RegexPattern { pattern: String, nocase: bool },
 
     // Operators & Punctuation
-    OpenBrace,     // {
-    CloseBrace,    // }
-    OpenParen,     // (
-    CloseParen,    // )
-    Colon,         // :
-    Equals,        // =
-    Comma,         // ,
-    Dot,           // .
-    Eq,            // ==
-    Neq,           // !=
-    Lt,            // <
-    Lte,           // <=
-    Gt,            // >
-    Gte,           // >=
-    Plus,          // +
-    Minus,         // -
-    Star,          // *
-    Slash,         // /
+    OpenBrace,  // {
+    CloseBrace, // }
+    OpenParen,  // (
+    CloseParen, // )
+    Colon,      // :
+    Equals,     // =
+    Comma,      // ,
+    Dot,        // .
+    Eq,         // ==
+    Neq,        // !=
+    Lt,         // <
+    Lte,        // <=
+    Gt,         // >
+    Gte,        // >=
+    Plus,       // +
+    Minus,      // -
+    Star,       // *
+    Slash,      // /
 
     Eof,
 }
@@ -452,7 +449,9 @@ impl Lexer {
         let mut s = String::new();
 
         // Check for hex: 0x...
-        if self.peek() == Some('0') && (self.peek_ahead(1) == Some('x') || self.peek_ahead(1) == Some('X')) {
+        if self.peek() == Some('0')
+            && (self.peek_ahead(1) == Some('x') || self.peek_ahead(1) == Some('X'))
+        {
             s.push(self.advance().unwrap()); // 0
             s.push(self.advance().unwrap()); // x
             while let Some(ch) = self.peek() {
@@ -473,7 +472,10 @@ impl Lexer {
         while let Some(ch) = self.peek() {
             if ch.is_ascii_digit() {
                 s.push(self.advance().unwrap());
-            } else if ch == '.' && !is_float && self.peek_ahead(1).is_some_and(|c| c.is_ascii_digit()) {
+            } else if ch == '.'
+                && !is_float
+                && self.peek_ahead(1).is_some_and(|c| c.is_ascii_digit())
+            {
                 is_float = true;
                 s.push(self.advance().unwrap());
             } else {

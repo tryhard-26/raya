@@ -13,10 +13,7 @@ pub struct BenchArgs {
 }
 
 pub fn run_bench(args: BenchArgs) -> i32 {
-    let rules_dir = args
-        .rules
-        .clone()
-        .unwrap_or_else(|| PathBuf::from("rules"));
+    let rules_dir = args.rules.clone().unwrap_or_else(|| PathBuf::from("rules"));
 
     let mut rule_files = Vec::new();
     if rules_dir.is_file() {
@@ -67,7 +64,10 @@ pub fn run_bench(args: BenchArgs) -> i32 {
             files_to_scan.push(args.target.clone());
         }
     } else if args.target.is_dir() {
-        for entry in WalkDir::new(&args.target).into_iter().filter_map(|e| e.ok()) {
+        for entry in WalkDir::new(&args.target)
+            .into_iter()
+            .filter_map(|e| e.ok())
+        {
             if entry.path().is_file() {
                 if let Ok(meta) = entry.metadata() {
                     total_bytes += meta.len();

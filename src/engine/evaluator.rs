@@ -194,7 +194,12 @@ impl<'a, 'b> Evaluator<'a, 'b> {
         }
     }
 
-    fn eval_binary_op(&mut self, left: EvalValue, op: BinaryOperator, right: EvalValue) -> EvalValue {
+    fn eval_binary_op(
+        &mut self,
+        left: EvalValue,
+        op: BinaryOperator,
+        right: EvalValue,
+    ) -> EvalValue {
         match op {
             BinaryOperator::Eq => EvalValue::Bool(left == right),
             BinaryOperator::Neq => EvalValue::Bool(left != right),
@@ -346,10 +351,11 @@ impl<'a, 'b> Evaluator<'a, 'b> {
                         if let Some(EvalValue::Str(instr)) = evaluated_args.first() {
                             let matched = pe.has_instruction(self.context.data, instr);
                             if matched {
-                                self.context.record_evidence(MatchedEvidence::Custom(format!(
-                                    "Disassembly matched opcode: {}",
-                                    instr
-                                )));
+                                self.context
+                                    .record_evidence(MatchedEvidence::Custom(format!(
+                                        "Disassembly matched opcode: {}",
+                                        instr
+                                    )));
                             }
                             return EvalValue::Bool(matched);
                         }
@@ -365,10 +371,11 @@ impl<'a, 'b> Evaluator<'a, 'b> {
                         if !seq.is_empty() {
                             let matched = pe.has_instruction_sequence(self.context.data, &seq);
                             if matched {
-                                self.context.record_evidence(MatchedEvidence::Custom(format!(
-                                    "Disassembly matched opcode sequence: [{}]",
-                                    seq.join(" -> ")
-                                )));
+                                self.context
+                                    .record_evidence(MatchedEvidence::Custom(format!(
+                                        "Disassembly matched opcode sequence: [{}]",
+                                        seq.join(" -> ")
+                                    )));
                             }
                             return EvalValue::Bool(matched);
                         }
@@ -422,7 +429,9 @@ impl<'a, 'b> Evaluator<'a, 'b> {
                     }
                     "has_section" => {
                         if evaluated_args.len() >= 2 {
-                            if let (EvalValue::Str(seg), EvalValue::Str(sec)) = (&evaluated_args[0], &evaluated_args[1]) {
+                            if let (EvalValue::Str(seg), EvalValue::Str(sec)) =
+                                (&evaluated_args[0], &evaluated_args[1])
+                            {
                                 return EvalValue::Bool(macho.get_section(seg, sec).is_some());
                             }
                         }
@@ -439,7 +448,8 @@ impl<'a, 'b> Evaluator<'a, 'b> {
                         Some(EvalValue::Int(w)) => (*w).max(1) as usize,
                         _ => 512,
                     };
-                    let (max_ent, _) = crate::entropy::max_window_entropy(self.context.data, window_size);
+                    let (max_ent, _) =
+                        crate::entropy::max_window_entropy(self.context.data, window_size);
                     return EvalValue::Float(max_ent);
                 }
                 "max_window_exceeds" => {
@@ -452,7 +462,8 @@ impl<'a, 'b> Evaluator<'a, 'b> {
                         Some(EvalValue::Int(i)) => *i as f64,
                         _ => 7.0,
                     };
-                    let (max_ent, _) = crate::entropy::max_window_entropy(self.context.data, window_size);
+                    let (max_ent, _) =
+                        crate::entropy::max_window_entropy(self.context.data, window_size);
                     return EvalValue::Bool(max_ent >= threshold);
                 }
                 _ => {}
@@ -465,7 +476,10 @@ impl<'a, 'b> Evaluator<'a, 'b> {
                     if let Some(EvalValue::Int(offset)) = evaluated_args.first() {
                         let off = *offset as usize;
                         if off + 2 <= self.context.data.len() {
-                            let val = u16::from_le_bytes([self.context.data[off], self.context.data[off + 1]]);
+                            let val = u16::from_le_bytes([
+                                self.context.data[off],
+                                self.context.data[off + 1],
+                            ]);
                             return EvalValue::Int(val as i64);
                         }
                     }
@@ -502,11 +516,12 @@ impl<'a, 'b> Evaluator<'a, 'b> {
         match obj_val {
             EvalValue::PeSec(sec) => match property {
                 "entropy" => {
-                    self.context.record_evidence(MatchedEvidence::PeSectionEntropy {
-                        section: sec.name.clone(),
-                        entropy: sec.entropy,
-                        threshold: 0.0,
-                    });
+                    self.context
+                        .record_evidence(MatchedEvidence::PeSectionEntropy {
+                            section: sec.name.clone(),
+                            entropy: sec.entropy,
+                            threshold: 0.0,
+                        });
                     EvalValue::Float(sec.entropy)
                 }
                 "virtual_size" => EvalValue::Int(sec.virtual_size as i64),
@@ -514,19 +529,21 @@ impl<'a, 'b> Evaluator<'a, 'b> {
                 "raw_size" => EvalValue::Int(sec.raw_size as i64),
                 "executable" => {
                     if sec.is_executable {
-                        self.context.record_evidence(MatchedEvidence::PeSectionFlag {
-                            section: sec.name.clone(),
-                            flag: "executable".to_string(),
-                        });
+                        self.context
+                            .record_evidence(MatchedEvidence::PeSectionFlag {
+                                section: sec.name.clone(),
+                                flag: "executable".to_string(),
+                            });
                     }
                     EvalValue::Bool(sec.is_executable)
                 }
                 "writable" => {
                     if sec.is_writable {
-                        self.context.record_evidence(MatchedEvidence::PeSectionFlag {
-                            section: sec.name.clone(),
-                            flag: "writable".to_string(),
-                        });
+                        self.context
+                            .record_evidence(MatchedEvidence::PeSectionFlag {
+                                section: sec.name.clone(),
+                                flag: "writable".to_string(),
+                            });
                     }
                     EvalValue::Bool(sec.is_writable)
                 }
@@ -549,7 +566,9 @@ impl<'a, 'b> Evaluator<'a, 'b> {
                                 "is_pe" => EvalValue::Bool(pe.is_pe),
                                 "is_dll" => EvalValue::Bool(pe.is_dll),
                                 "is_pe32_plus" => EvalValue::Bool(pe.is_pe32_plus),
-                                "number_of_sections" => EvalValue::Int(pe.number_of_sections as i64),
+                                "number_of_sections" => {
+                                    EvalValue::Int(pe.number_of_sections as i64)
+                                }
                                 "entry_point" => EvalValue::Int(pe.entry_point as i64),
                                 "has_rwx" => EvalValue::Bool(pe.has_rwx_section()),
                                 "is_signed" => EvalValue::Bool(pe.is_signed),
@@ -567,7 +586,9 @@ impl<'a, 'b> Evaluator<'a, 'b> {
                                 "is_64" => EvalValue::Bool(elf.is_64),
                                 "is_executable" => EvalValue::Bool(elf.is_executable),
                                 "is_shared_object" => EvalValue::Bool(elf.is_shared_object),
-                                "number_of_sections" => EvalValue::Int(elf.number_of_sections as i64),
+                                "number_of_sections" => {
+                                    EvalValue::Int(elf.number_of_sections as i64)
+                                }
                                 "entry_point" => EvalValue::Int(elf.entry_point as i64),
                                 _ => EvalValue::None,
                             };
@@ -581,7 +602,9 @@ impl<'a, 'b> Evaluator<'a, 'b> {
                                 "is_64" => EvalValue::Bool(macho.is_64),
                                 "is_fat" => EvalValue::Bool(macho.is_fat),
                                 "is_signed" => EvalValue::Bool(macho.is_signed),
-                                "number_of_commands" => EvalValue::Int(macho.number_of_commands as i64),
+                                "number_of_commands" => {
+                                    EvalValue::Int(macho.number_of_commands as i64)
+                                }
                                 "number_of_segments" => EvalValue::Int(macho.segments.len() as i64),
                                 "entry_point" => EvalValue::Int(macho.entry_point as i64),
                                 "cpu_type" => EvalValue::Int(macho.cpu_type as i64),

@@ -25,7 +25,11 @@ pub fn shannon_entropy(data: &[u8]) -> f64 {
 
 /// Computes Shannon entropy over sliding windows across the data slice.
 /// Returns a vector of tuples `(offset, entropy)`.
-pub fn sliding_window_entropy(data: &[u8], window_size: usize, step_size: usize) -> Vec<(usize, f64)> {
+pub fn sliding_window_entropy(
+    data: &[u8],
+    window_size: usize,
+    step_size: usize,
+) -> Vec<(usize, f64)> {
     if data.is_empty() || window_size == 0 {
         return Vec::new();
     }
@@ -118,7 +122,15 @@ mod tests {
         }
 
         let (max_ent, max_off) = max_window_entropy(&mixed, 256);
-        assert!(max_ent > 7.0, "Expected high entropy window, got {}", max_ent);
-        assert!((max_off as isize - 500).abs() <= 64, "Expected max offset near 500, got {}", max_off);
+        assert!(
+            max_ent > 7.0,
+            "Expected high entropy window, got {}",
+            max_ent
+        );
+        assert!(
+            (max_off as isize - 500).abs() <= 64,
+            "Expected max offset near 500, got {}",
+            max_off
+        );
     }
 }

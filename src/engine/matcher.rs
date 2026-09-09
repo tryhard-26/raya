@@ -14,10 +14,7 @@ pub struct StringMatch {
 #[derive(Debug, thiserror::Error)]
 pub enum MatchError {
     #[error("Regex error for string '{id}': {source}")]
-    RegexError {
-        id: String,
-        source: regex::Error,
-    },
+    RegexError { id: String, source: regex::Error },
     #[error("Aho-Corasick builder error: {0}")]
     AhoCorasickError(#[from] aho_corasick::BuildError),
 }

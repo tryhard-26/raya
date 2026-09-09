@@ -54,7 +54,10 @@ impl ScanResult {
         out.push_str(&format!("Entropy: {:.2} / 8.0\n", self.entropy));
 
         if self.matches.is_empty() {
-            out.push_str(&format!("\n{}\n", "✓ No rules matched (clean)".green().bold()));
+            out.push_str(&format!(
+                "\n{}\n",
+                "✓ No rules matched (clean)".green().bold()
+            ));
             return out;
         }
 
@@ -80,7 +83,12 @@ impl ScanResult {
                 String::new()
             };
 
-            out.push_str(&format!("\n{} {}{}\n", sev_tag, m.rule.bold(), tags_str.dimmed()));
+            out.push_str(&format!(
+                "\n{} {}{}\n",
+                sev_tag,
+                m.rule.bold(),
+                tags_str.dimmed()
+            ));
 
             if let Some(desc) = &m.description {
                 out.push_str(&format!("  Description: {}\n", desc));
@@ -121,7 +129,9 @@ impl ScanResult {
                     MatchedEvidence::PeExport { function } => {
                         out.push_str(&format!("    ✓ Exported Symbol: {}\n", function.yellow()));
                     }
-                    MatchedEvidence::PeSectionEntropy { section, entropy, .. } => {
+                    MatchedEvidence::PeSectionEntropy {
+                        section, entropy, ..
+                    } => {
                         out.push_str(&format!(
                             "    ✓ Section '{}' entropy: {:.2}\n",
                             section.cyan(),
@@ -135,7 +145,11 @@ impl ScanResult {
                             flag.red()
                         ));
                     }
-                    MatchedEvidence::Quantifier { required, matched, indicators } => {
+                    MatchedEvidence::Quantifier {
+                        required,
+                        matched,
+                        indicators,
+                    } => {
                         out.push_str(&format!(
                             "    ✓ Quantifier: {}/{} indicators satisfied ({})\n",
                             matched,

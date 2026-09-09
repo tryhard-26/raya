@@ -141,14 +141,19 @@ impl Engine {
         }
     }
 
-    pub fn save_compiled_rules<P: AsRef<Path>>(&self, path: P) -> Result<(), Box<dyn std::error::Error>> {
+    pub fn save_compiled_rules<P: AsRef<Path>>(
+        &self,
+        path: P,
+    ) -> Result<(), Box<dyn std::error::Error>> {
         let rules: Vec<Rule> = self.rules.iter().map(|cr| cr.rule.clone()).collect();
         let encoded = bincode::serialize(&rules)?;
         fs::write(path, encoded)?;
         Ok(())
     }
 
-    pub fn load_compiled_rules<P: AsRef<Path>>(path: P) -> Result<Self, Box<dyn std::error::Error>> {
+    pub fn load_compiled_rules<P: AsRef<Path>>(
+        path: P,
+    ) -> Result<Self, Box<dyn std::error::Error>> {
         let bytes = fs::read(path)?;
         let rules: Vec<Rule> = bincode::deserialize(&bytes)?;
         let engine = Self::compile_rules(rules)?;
@@ -205,7 +210,9 @@ mod tests {
         let temp_dir = tempfile::tempdir().unwrap();
         let cache_path = temp_dir.path().join("rules.rc");
 
-        engine.save_compiled_rules(&cache_path).expect("Failed to save rules");
+        engine
+            .save_compiled_rules(&cache_path)
+            .expect("Failed to save rules");
         assert!(cache_path.exists());
 
         let loaded_engine = Engine::load_compiled_rules(&cache_path).expect("Failed to load rules");

@@ -1,7 +1,7 @@
 mod common;
 
 use common::build_mock_pe;
-use raya::binary::{parse_pe, BinaryFormat, detect_format};
+use raya::binary::{detect_format, parse_pe, BinaryFormat};
 
 #[test]
 fn test_pe_parsing_sections_and_entropy() {
@@ -50,5 +50,8 @@ fn test_pe_rwx_detection() {
     );
 
     let pe_info = parse_pe(&mock_rwx).expect("PE should parse");
-    assert!(pe_info.has_rwx_section(), "Should detect RWX section characteristics");
+    assert!(
+        pe_info.has_rwx_section(),
+        "Should detect RWX section characteristics"
+    );
 }

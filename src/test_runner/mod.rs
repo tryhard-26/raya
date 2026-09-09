@@ -97,7 +97,10 @@ impl TestSummary {
         }
 
         out.push_str(&format!("\nTotal tests:     {}\n", self.total_tests));
-        out.push_str(&format!("Passed:          {}\n", self.passed.to_string().green()));
+        out.push_str(&format!(
+            "Passed:          {}\n",
+            self.passed.to_string().green()
+        ));
         out.push_str(&format!(
             "Failed:          {}\n",
             if self.failed > 0 {
@@ -157,11 +160,14 @@ pub fn run_test_suite<P: AsRef<Path>>(spec_path: P) -> Result<TestSummary, Strin
             }
         }
     } else {
-        return Err(format!("Rules path '{}' does not exist", rules_path.display()));
+        return Err(format!(
+            "Rules path '{}' does not exist",
+            rules_path.display()
+        ));
     }
 
-    let engine = Engine::compile_rules(all_rules)
-        .map_err(|e| format!("Engine compilation error: {}", e))?;
+    let engine =
+        Engine::compile_rules(all_rules).map_err(|e| format!("Engine compilation error: {}", e))?;
 
     let mut details = Vec::new();
     let mut passed = 0;
@@ -243,7 +249,10 @@ pub fn run_test_suite<P: AsRef<Path>>(spec_path: P) -> Result<TestSummary, Strin
                         actual_match: matched,
                         passed: is_pass,
                         error: if matched {
-                            Some(format!("False positive! Rule '{}' matched clean sample", case.rule))
+                            Some(format!(
+                                "False positive! Rule '{}' matched clean sample",
+                                case.rule
+                            ))
                         } else {
                             None
                         },

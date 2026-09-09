@@ -9,7 +9,10 @@ pub fn has_mnemonic_sequence(code: &[u8], bitness: u32, target_sequence: &[&str]
 
     let mut decoder = Decoder::with_ip(bitness, code, 0x1000, DecoderOptions::NONE);
     let mut seq_idx = 0;
-    let target_lower: Vec<String> = target_sequence.iter().map(|s| s.to_ascii_lowercase()).collect();
+    let target_lower: Vec<String> = target_sequence
+        .iter()
+        .map(|s| s.to_ascii_lowercase())
+        .collect();
 
     while decoder.can_decode() {
         let instr = decoder.decode();
@@ -63,7 +66,7 @@ mod tests {
         // mov eax, 1; xor ebx, ebx; call 0x1010
         let code = [
             0xB8, 0x01, 0x00, 0x00, 0x00, // mov eax, 1
-            0x31, 0xDB,                   // xor ebx, ebx
+            0x31, 0xDB, // xor ebx, ebx
             0xE8, 0x09, 0x00, 0x00, 0x00, // call +9
         ];
 

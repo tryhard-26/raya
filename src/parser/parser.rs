@@ -92,7 +92,10 @@ impl Parser {
             if let TokenKind::Ident(ref id) = self.peek_kind() {
                 if id == "import" || id == "include" {
                     self.advance();
-                    if matches!(self.peek_kind(), TokenKind::StringLit(_) | TokenKind::Ident(_)) {
+                    if matches!(
+                        self.peek_kind(),
+                        TokenKind::StringLit(_) | TokenKind::Ident(_)
+                    ) {
                         self.advance();
                     }
                     continue;
@@ -210,7 +213,10 @@ impl Parser {
             TokenKind::False => Ok(MetaValue::Boolean(false)),
             other => Err(ParseError {
                 location: tok.location,
-                message: format!("Expected meta value (string, int, float, bool), found {}", other),
+                message: format!(
+                    "Expected meta value (string, int, float, bool), found {}",
+                    other
+                ),
             }),
         }
     }
@@ -239,7 +245,8 @@ impl Parser {
                 while matches!(
                     self.peek_kind(),
                     TokenKind::Ascii | TokenKind::Wide | TokenKind::Nocase
-                ) || matches!(self.peek_kind(), TokenKind::Ident(ref id) if id == "fullword" || id == "private" || id == "xor" || id == "base64") {
+                ) || matches!(self.peek_kind(), TokenKind::Ident(ref id) if id == "fullword" || id == "private" || id == "xor" || id == "base64")
+                {
                     match self.advance().kind {
                         TokenKind::Ascii => ascii = true,
                         TokenKind::Wide => wide = true,
@@ -574,7 +581,10 @@ impl Parser {
                 let name = s.clone();
                 self.advance();
                 if name.ends_with('*') {
-                    self.expect(TokenKind::CloseParen, "expected ')' closing wildcard selector")?;
+                    self.expect(
+                        TokenKind::CloseParen,
+                        "expected ')' closing wildcard selector",
+                    )?;
                     return Ok(SetSelector::Wildcard(name));
                 }
                 list.push(name);

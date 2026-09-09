@@ -21,8 +21,16 @@ impl BinaryAnalysis {
     pub fn analyze(data: &[u8]) -> Self {
         let format = detect_format(data);
         let pe = if format.is_pe() { parse_pe(data) } else { None };
-        let elf = if format.is_elf() { parse_elf(data) } else { None };
-        let macho = if format.is_macho() { parse_macho(data) } else { None };
+        let elf = if format.is_elf() {
+            parse_elf(data)
+        } else {
+            None
+        };
+        let macho = if format.is_macho() {
+            parse_macho(data)
+        } else {
+            None
+        };
 
         Self {
             format,

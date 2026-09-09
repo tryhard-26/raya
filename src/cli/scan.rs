@@ -23,15 +23,17 @@ pub struct ScanArgs {
 }
 
 pub fn run_scan(args: ScanArgs) -> i32 {
-    let rules_dir = args
-        .rules
-        .clone()
-        .unwrap_or_else(|| PathBuf::from("rules"));
+    let rules_dir = args.rules.clone().unwrap_or_else(|| PathBuf::from("rules"));
 
     let engine = match load_or_compile_rules(&rules_dir) {
         Ok(mut eng) => {
             if let Some(ref target_tag) = args.tag {
-                eng.rules.retain(|r| r.rule.tags.iter().any(|t| t.eq_ignore_ascii_case(target_tag)));
+                eng.rules.retain(|r| {
+                    r.rule
+                        .tags
+                        .iter()
+                        .any(|t| t.eq_ignore_ascii_case(target_tag))
+                });
                 if eng.rules.is_empty() {
                     eprintln!(
                         "{} No rules matched tag '{}'.",
@@ -72,9 +74,22 @@ pub fn run_scan(args: ScanArgs) -> i32 {
     };
 
     if target.is_file() {
-        scan_single_file(&engine, &target, args.json, args.quiet, args.format.as_deref())
+        scan_single_file(
+            &engine,
+            &target,
+            args.json,
+            args.quiet,
+            args.format.as_deref(),
+        )
     } else if target.is_dir() {
-        scan_directory(&engine, &target, args.recursive, args.json, args.quiet, args.format.as_deref())
+        scan_directory(
+            &engine,
+            &target,
+            args.recursive,
+            args.json,
+            args.quiet,
+            args.format.as_deref(),
+        )
     } else {
         eprintln!(
             "{} Target '{}' does not exist.",
@@ -95,7 +110,13 @@ fn scan_stdin(engine: &Engine, json: bool, quiet: bool, format: Option<&str>) ->
     render_single_result(&result, json, quiet, format)
 }
 
-fn scan_single_file(engine: &Engine, path: &Path, json: bool, quiet: bool, format: Option<&str>) -> i32 {
+fn scan_single_file(
+    engine: &Engine,
+    path: &Path,
+    json: bool,
+    quiet: bool,
+    format: Option<&str>,
+) -> i32 {
     let result = match engine.scan_file(path) {
         Ok(res) => res,
         Err(e) => {
@@ -227,33 +248,27 @@ fn scan_directory(
     let fmt = format.unwrap_or(if json { "json" } else { "text" });
 
     match fmt {
-        "sarif" => {
-            match to_sarif(&matched_results) {
-                Ok(s) => println!("{}", s),
-                Err(e) => {
-                    eprintln!("{} Failed to serialize SARIF: {}", "ERROR:".red().bold(), e);
-                    return 2;
-                }
+        "sarif" => match to_sarif(&matched_results) {
+            Ok(s) => println!("{}", s),
+            Err(e) => {
+                eprintln!("{} Failed to serialize SARIF: {}", "ERROR:".red().bold(), e);
+                return 2;
             }
-        }
-        "stix" => {
-            match to_stix(&matched_results) {
-                Ok(s) => println!("{}", s),
-                Err(e) => {
-                    eprintln!("{} Failed to serialize STIX: {}", "ERROR:".red().bold(), e);
-                    return 2;
-                }
+        },
+        "stix" => match to_stix(&matched_results) {
+            Ok(s) => println!("{}", s),
+            Err(e) => {
+                eprintln!("{} Failed to serialize STIX: {}", "ERROR:".red().bold(), e);
+                return 2;
             }
-        }
-        "json" => {
-            match serde_json::to_string_pretty(&matched_results) {
-                Ok(j) => println!("{}", j),
-                Err(e) => {
-                    eprintln!("{} Failed to serialize JSON: {}", "ERROR:".red().bold(), e);
-                    return 2;
-                }
+        },
+        "json" => match serde_json::to_string_pretty(&matched_results) {
+            Ok(j) => println!("{}", j),
+            Err(e) => {
+                eprintln!("{} Failed to serialize JSON: {}", "ERROR:".red().bold(), e);
+                return 2;
             }
-        }
+        },
         _ => {
             if quiet {
                 for res in &matched_results {
@@ -289,7 +304,11 @@ fn scan_directory(
                 println!("Scan duration:  {:.3}s", elapsed.as_secs_f64());
 
                 if !errors.is_empty() {
-                    println!("\n{} Encountered {} file read error(s):", "WARNING:".yellow().bold(), errors.len());
+                    println!(
+                        "\n{} Encountered {} file read error(s):",
+                        "WARNING:".yellow().bold(),
+                        errors.len()
+                    );
                     for (path, err) in errors.iter().take(5) {
                         println!("  {}: {}", path.display(), err);
                     }

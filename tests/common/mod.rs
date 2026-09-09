@@ -2,7 +2,7 @@
 #![allow(dead_code)]
 
 pub fn build_mock_pe(
-    sections: &[(&str, u32, &[u8])], // (name, characteristics, data)
+    sections: &[(&str, u32, &[u8])],   // (name, characteristics, data)
     imported_dlls: &[(&str, &[&str])], // (dll_name, [funcs])
 ) -> Vec<u8> {
     let mut pe = vec![0u8; 1024];
@@ -57,7 +57,8 @@ pub fn build_mock_pe(
         pe[entry_offset + 8..entry_offset + 12].copy_from_slice(&virt_size.to_le_bytes());
         pe[entry_offset + 12..entry_offset + 16].copy_from_slice(&current_rva.to_le_bytes());
         pe[entry_offset + 16..entry_offset + 20].copy_from_slice(&raw_size.to_le_bytes());
-        pe[entry_offset + 20..entry_offset + 24].copy_from_slice(&current_file_offset.to_le_bytes());
+        pe[entry_offset + 20..entry_offset + 24]
+            .copy_from_slice(&current_file_offset.to_le_bytes());
         pe[entry_offset + 36..entry_offset + 40].copy_from_slice(&chars.to_le_bytes());
 
         // Append section data to PE
@@ -128,7 +129,8 @@ pub fn build_mock_pe32(
         pe[entry_offset + 8..entry_offset + 12].copy_from_slice(&virt_size.to_le_bytes());
         pe[entry_offset + 12..entry_offset + 16].copy_from_slice(&current_rva.to_le_bytes());
         pe[entry_offset + 16..entry_offset + 20].copy_from_slice(&raw_size.to_le_bytes());
-        pe[entry_offset + 20..entry_offset + 24].copy_from_slice(&current_file_offset.to_le_bytes());
+        pe[entry_offset + 20..entry_offset + 24]
+            .copy_from_slice(&current_file_offset.to_le_bytes());
         pe[entry_offset + 36..entry_offset + 40].copy_from_slice(&chars.to_le_bytes());
 
         if pe.len() < (current_file_offset as usize + raw_size as usize) {
@@ -156,4 +158,3 @@ pub fn build_mock_elf(payload: &[u8]) -> Vec<u8> {
     elf[64..64 + payload.len()].copy_from_slice(payload);
     elf
 }
-
