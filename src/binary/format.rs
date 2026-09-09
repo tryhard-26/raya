@@ -8,6 +8,9 @@ pub enum BinaryFormat {
     Elf32,
     Elf64,
     MachO,
+    MachO32,
+    MachO64,
+    MachOFat,
     Raw,
 }
 
@@ -19,6 +22,9 @@ impl BinaryFormat {
             BinaryFormat::Elf32 => "ELF32",
             BinaryFormat::Elf64 => "ELF64",
             BinaryFormat::MachO => "Mach-O",
+            BinaryFormat::MachO32 => "Mach-O 32-bit",
+            BinaryFormat::MachO64 => "Mach-O 64-bit",
+            BinaryFormat::MachOFat => "Mach-O Universal/FAT",
             BinaryFormat::Raw => "Raw/Unknown",
         }
     }
@@ -29,6 +35,16 @@ impl BinaryFormat {
 
     pub fn is_elf(&self) -> bool {
         matches!(self, BinaryFormat::Elf32 | BinaryFormat::Elf64)
+    }
+
+    pub fn is_macho(&self) -> bool {
+        matches!(
+            self,
+            BinaryFormat::MachO
+                | BinaryFormat::MachO32
+                | BinaryFormat::MachO64
+                | BinaryFormat::MachOFat
+        )
     }
 }
 
@@ -68,14 +84,12 @@ pub fn detect_format(data: &[u8]) -> BinaryFormat {
     // Check Mach-O
     if data.len() >= 4 {
         let magic = &data[0..4];
-        if magic == b"\xfe\xed\xfa\xce"
-            || magic == b"\xce\xfa\xed\xfe"
-            || magic == b"\xfe\xed\xfa\xcf"
-            || magic == b"\xcf\xfa\xed\xfe"
-            || magic == b"\xca\xfe\xba\xbe"
-            || magic == b"\xbe\xba\xfe\xca"
-        {
-            return BinaryFormat::MachO;
+        if magic == b"\xfe\xed\xfa\xce" || magic == b"\xce\xfa\xed\xfe" {
+            return BinaryFormat::MachO32;
+        } else if magic == b"\xfe\xed\xfa\xcf" || magic == b"\xcf\xfa\xed\xfe" {
+            return BinaryFormat::MachO64;
+        } else if magic == b"\xca\xfe\xba\xbe" || magic == b"\xbe\xba\xfe\xca" {
+            return BinaryFormat::MachOFat;
         }
     }
 

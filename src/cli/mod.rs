@@ -1,5 +1,7 @@
 pub mod bench;
 pub mod check;
+pub mod compile;
+pub mod process;
 pub mod scan;
 pub mod test;
 
@@ -12,7 +14,7 @@ use std::path::PathBuf;
     author = "Raya Security Engineering",
     version,
     about = "Rust-native malware detection and binary pattern-matching engine",
-    long_about = "Raya is a modern, high-performance binary analysis and static detection engine.\nIt provides multi-pattern string/hex/regex matching, deep PE/ELF inspection, Shannon entropy analysis, and explainable verdicts."
+    long_about = "Raya is a modern, high-performance binary analysis and static detection engine.\nIt provides multi-pattern string/hex/regex matching, deep PE/ELF/Mach-O inspection, Shannon entropy analysis, and explainable verdicts."
 )]
 pub struct Cli {
     #[command(subcommand)]
@@ -21,12 +23,13 @@ pub struct Cli {
 
 #[derive(Subcommand)]
 pub enum Commands {
-    /// Scan a file or directory against Raya detection rules
+    /// Scan a file, directory, live process memory, or stdin against Raya detection rules
     Scan {
-        /// Target file or directory to scan
-        target: PathBuf,
+        /// Target file, directory, or '-' for standard input
+        #[arg(value_name = "TARGET")]
+        target: Option<PathBuf>,
 
-        /// Path to rule file or directory containing rules (default: ./rules)
+        /// Path to rule file, directory, or precompiled .rc rule cache (default: ./rules)
         #[arg(short = 'R', long)]
         rules: Option<PathBuf>,
 
@@ -37,6 +40,14 @@ pub enum Commands {
         /// Output results in JSON format
         #[arg(long)]
         json: bool,
+
+        /// Output format: text, json, sarif, or stix
+        #[arg(long, value_name = "FORMAT")]
+        format: Option<String>,
+
+        /// Scan live process virtual memory by PID
+        #[arg(long, value_name = "PID")]
+        pid: Option<u32>,
 
         /// Quiet mode: emit minimal output suitable for shell pipelines
         #[arg(short, long)]
@@ -49,6 +60,16 @@ pub enum Commands {
         /// Number of worker threads for parallel scanning
         #[arg(long)]
         threads: Option<usize>,
+    },
+
+    /// Pre-compile rules into a high-performance binary cache (.rc)
+    Compile {
+        /// Path to rule file or directory containing rules
+        rules: PathBuf,
+
+        /// Output compiled rule cache path
+        #[arg(short, long, default_value = "rules.rc")]
+        output: PathBuf,
     },
 
     /// Validate syntax and integrity of rule files
@@ -98,6 +119,8 @@ pub fn run_cli() -> i32 {
             rules,
             recursive,
             json,
+            format,
+            pid,
             quiet,
             tag,
             threads,
@@ -106,10 +129,15 @@ pub fn run_cli() -> i32 {
             rules,
             recursive,
             json,
+            format,
+            pid,
             quiet,
             tag,
             threads,
         }),
+        Commands::Compile { rules, output } => {
+            compile::run_compile(compile::CompileArgs { rules, output })
+        }
         Commands::Check { path, verbose } => {
             check::run_check(check::CheckArgs { path, verbose })
         }

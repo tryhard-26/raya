@@ -21,6 +21,13 @@ pub struct PeImport {
     pub ordinals: Vec<u16>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct RichEntry {
+    pub comp_id: u16,
+    pub product_id: u16,
+    pub count: u32,
+}
+
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct PeInfo {
     pub is_pe: bool,
@@ -33,6 +40,10 @@ pub struct PeInfo {
     pub sections: Vec<PeSection>,
     pub imports: Vec<PeImport>,
     pub exports: Vec<String>,
+    pub has_rich_header: bool,
+    pub rich_entries: Vec<RichEntry>,
+    pub is_signed: bool,
+    pub security_dir_size: u32,
 }
 
 impl PeInfo {
@@ -48,7 +59,19 @@ impl PeInfo {
             sections: Vec::new(),
             imports: Vec::new(),
             exports: Vec::new(),
+            has_rich_header: false,
+            rich_entries: Vec::new(),
+            is_signed: false,
+            security_dir_size: 0,
         }
+    }
+
+    pub fn has_rich_comp_id(&self, target_comp_id: u16) -> bool {
+        self.rich_entries.iter().any(|e| e.comp_id == target_comp_id)
+    }
+
+    pub fn has_rich_product_id(&self, target_product_id: u16) -> bool {
+        self.rich_entries.iter().any(|e| e.product_id == target_product_id)
     }
 
     pub fn get_section(&self, name: &str) -> Option<&PeSection> {
@@ -233,6 +256,31 @@ pub fn parse_pe(data: &[u8]) -> Option<PeInfo> {
     } else {
         (0, 0)
     };
+
+    // Security Directory (Index 4 in Data Directories, each entry 8 bytes: offset/RVA + size)
+    let (sec_dir_offset, sec_dir_size) = if data_dirs_offset + 32 + 8 <= opt_offset + size_of_opt_header {
+        let raw_off = u32::from_le_bytes([
+            data[data_dirs_offset + 32],
+            data[data_dirs_offset + 33],
+            data[data_dirs_offset + 34],
+            data[data_dirs_offset + 35],
+        ]);
+        let size = u32::from_le_bytes([
+            data[data_dirs_offset + 36],
+            data[data_dirs_offset + 37],
+            data[data_dirs_offset + 38],
+            data[data_dirs_offset + 39],
+        ]);
+        (raw_off, size)
+    } else {
+        (0, 0)
+    };
+
+    let is_signed = sec_dir_size > 0
+        && sec_dir_offset > 0
+        && (sec_dir_offset as usize + sec_dir_size as usize) <= data.len();
+
+    let (has_rich_header, rich_entries) = parse_rich_header(data, e_lfanew);
 
     // Parse Sections
     let section_headers_offset = opt_offset + size_of_opt_header;
@@ -509,5 +557,85 @@ pub fn parse_pe(data: &[u8]) -> Option<PeInfo> {
         sections,
         imports,
         exports,
+        has_rich_header,
+        rich_entries,
+        is_signed,
+        security_dir_size: sec_dir_size,
     })
+}
+
+fn parse_rich_header(data: &[u8], e_lfanew: usize) -> (bool, Vec<RichEntry>) {
+    if e_lfanew < 0x80 || e_lfanew > data.len() {
+        return (false, Vec::new());
+    }
+    let stub = &data[0x40..e_lfanew];
+    let mut rich_pos = None;
+    for i in (0..stub.len().saturating_sub(7)).step_by(4) {
+        if &stub[i..i + 4] == b"Rich" {
+            rich_pos = Some(0x40 + i);
+            break;
+        }
+    }
+
+    let rich_off = match rich_pos {
+        Some(pos) => pos,
+        None => return (false, Vec::new()),
+    };
+
+    if rich_off + 8 > e_lfanew {
+        return (false, Vec::new());
+    }
+
+    let xor_key = u32::from_le_bytes([
+        data[rich_off + 4],
+        data[rich_off + 5],
+        data[rich_off + 6],
+        data[rich_off + 7],
+    ]);
+
+    let dans_marker = u32::from_le_bytes(*b"DanS") ^ xor_key;
+
+    let mut dans_pos = None;
+    let mut curr = rich_off.saturating_sub(4);
+    while curr >= 0x40 {
+        let val = u32::from_le_bytes([data[curr], data[curr + 1], data[curr + 2], data[curr + 3]]);
+        if val == dans_marker {
+            dans_pos = Some(curr);
+            break;
+        }
+        if curr < 4 {
+            break;
+        }
+        curr -= 4;
+    }
+
+    let start_entries = match dans_pos {
+        Some(pos) => pos + 16,
+        None => return (false, Vec::new()),
+    };
+
+    if start_entries >= rich_off {
+        return (true, Vec::new());
+    }
+
+    let mut entries = Vec::new();
+    let mut off = start_entries;
+    while off + 8 <= rich_off {
+        let dword1 = u32::from_le_bytes([data[off], data[off + 1], data[off + 2], data[off + 3]]) ^ xor_key;
+        let dword2 = u32::from_le_bytes([data[off + 4], data[off + 5], data[off + 6], data[off + 7]]) ^ xor_key;
+
+        let comp_id = (dword1 & 0xFFFF) as u16;
+        let product_id = ((dword1 >> 16) & 0xFFFF) as u16;
+        let count = dword2;
+
+        entries.push(RichEntry {
+            comp_id,
+            product_id,
+            count,
+        });
+
+        off += 8;
+    }
+
+    (true, entries)
 }

@@ -89,6 +89,18 @@ impl Parser {
     pub fn parse_rules(&mut self) -> Result<Vec<Rule>, ParseError> {
         let mut rules = Vec::new();
         while !self.check(&TokenKind::Eof) {
+            if let TokenKind::Ident(ref id) = self.peek_kind() {
+                if id == "import" || id == "include" {
+                    self.advance();
+                    if matches!(self.peek_kind(), TokenKind::StringLit(_) | TokenKind::Ident(_)) {
+                        self.advance();
+                    }
+                    continue;
+                }
+                if id == "global" || id == "private" {
+                    self.advance();
+                }
+            }
             rules.push(self.parse_rule()?);
         }
         Ok(rules)
@@ -227,12 +239,12 @@ impl Parser {
                 while matches!(
                     self.peek_kind(),
                     TokenKind::Ascii | TokenKind::Wide | TokenKind::Nocase
-                ) {
+                ) || matches!(self.peek_kind(), TokenKind::Ident(ref id) if id == "fullword" || id == "private" || id == "xor" || id == "base64") {
                     match self.advance().kind {
                         TokenKind::Ascii => ascii = true,
                         TokenKind::Wide => wide = true,
                         TokenKind::Nocase => nocase = true,
-                        _ => unreachable!(),
+                        _ => {}
                     }
                 }
 
@@ -289,23 +301,36 @@ impl Parser {
     fn parse_expr_comparison(&mut self) -> Result<Expr, ParseError> {
         let mut left = self.parse_expr_additive()?;
         loop {
-            let op = if self.match_token(&TokenKind::Eq) {
-                BinaryOperator::Eq
+            let (op, is_at) = if self.match_token(&TokenKind::Eq) {
+                (BinaryOperator::Eq, false)
             } else if self.match_token(&TokenKind::Neq) {
-                BinaryOperator::Neq
+                (BinaryOperator::Neq, false)
             } else if self.match_token(&TokenKind::Lt) {
-                BinaryOperator::Lt
+                (BinaryOperator::Lt, false)
             } else if self.match_token(&TokenKind::Lte) {
-                BinaryOperator::Lte
+                (BinaryOperator::Lte, false)
             } else if self.match_token(&TokenKind::Gt) {
-                BinaryOperator::Gt
+                (BinaryOperator::Gt, false)
             } else if self.match_token(&TokenKind::Gte) {
-                BinaryOperator::Gte
+                (BinaryOperator::Gte, false)
+            } else if matches!(self.peek_kind(), TokenKind::Ident(ref id) if id == "at") {
+                self.advance();
+                (BinaryOperator::Eq, true)
             } else {
                 break;
             };
 
             let right = self.parse_expr_additive()?;
+            if is_at {
+                if let Expr::StringRef(ref id) = left {
+                    left = Expr::Binary {
+                        left: Box::new(Expr::StringOffset(id.clone())),
+                        op: BinaryOperator::Eq,
+                        right: Box::new(right),
+                    };
+                    continue;
+                }
+            }
             left = Expr::Binary {
                 left: Box::new(left),
                 op,

@@ -122,9 +122,37 @@ impl Engine {
 
     pub fn scan_file<P: AsRef<Path>>(&self, path: P) -> Result<ScanResult, std::io::Error> {
         let p = path.as_ref();
-        let data = fs::read(p)?;
         let target_name = p.display().to_string();
-        Ok(self.scan_bytes(&data, &target_name))
+        let file = fs::File::open(p)?;
+        let meta = file.metadata()?;
+        let file_len = meta.len();
+
+        if file_len == 0 {
+            return Ok(self.scan_bytes(&[], &target_name));
+        }
+
+        // Use memory-mapped I/O (memmap2) for files >= 16 KB to eliminate buffer copying
+        if file_len >= 16 * 1024 {
+            let mmap = unsafe { memmap2::Mmap::map(&file)? };
+            Ok(self.scan_bytes(&mmap, &target_name))
+        } else {
+            let data = fs::read(p)?;
+            Ok(self.scan_bytes(&data, &target_name))
+        }
+    }
+
+    pub fn save_compiled_rules<P: AsRef<Path>>(&self, path: P) -> Result<(), Box<dyn std::error::Error>> {
+        let rules: Vec<Rule> = self.rules.iter().map(|cr| cr.rule.clone()).collect();
+        let encoded = bincode::serialize(&rules)?;
+        fs::write(path, encoded)?;
+        Ok(())
+    }
+
+    pub fn load_compiled_rules<P: AsRef<Path>>(path: P) -> Result<Self, Box<dyn std::error::Error>> {
+        let bytes = fs::read(path)?;
+        let rules: Vec<Rule> = bincode::deserialize(&bytes)?;
+        let engine = Self::compile_rules(rules)?;
+        Ok(engine)
     }
 }
 
@@ -156,5 +184,34 @@ mod tests {
         assert!(result.has_matches());
         assert_eq!(result.matches.len(), 1);
         assert_eq!(result.matches[0].rule, "detect_secret");
+    }
+
+    #[test]
+    fn test_save_load_compiled_rules() {
+        let rule_source = r#"
+            rule cache_test {
+                meta:
+                    severity = "critical"
+                strings:
+                    $sig = "MALWARE_SIGNATURE_99"
+                condition:
+                    $sig
+            }
+        "#;
+
+        let rules = parse_rules_from_str(rule_source).unwrap();
+        let engine = Engine::compile_rules(rules).unwrap();
+
+        let temp_dir = tempfile::tempdir().unwrap();
+        let cache_path = temp_dir.path().join("rules.rc");
+
+        engine.save_compiled_rules(&cache_path).expect("Failed to save rules");
+        assert!(cache_path.exists());
+
+        let loaded_engine = Engine::load_compiled_rules(&cache_path).expect("Failed to load rules");
+        let payload = b"Injecting MALWARE_SIGNATURE_99 inside memory";
+        let res = loaded_engine.scan_bytes(payload, "sample.bin");
+        assert!(res.has_matches());
+        assert_eq!(res.matches[0].rule, "cache_test");
     }
 }

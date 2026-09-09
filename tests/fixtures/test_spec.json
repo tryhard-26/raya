@@ -1,11 +1,12 @@
 {
-  "name": "Raya Core Rule Verification Suite",
+  "name": "Raya Comprehensive Malware & Exploit Rule Verification Suite",
   "rules_path": "../../rules",
   "cases": [
     {
       "rule": "process_injection",
       "positive": [
-        "sample_injection.exe"
+        "sample_injection.exe",
+        "cobalt_strike_beacon.exe"
       ],
       "negative": [
         "clean_application.exe"
@@ -18,6 +19,69 @@
       ],
       "negative": [
         "clean_script.ps1"
+      ]
+    },
+    {
+      "rule": "ransomware_wannacry",
+      "positive": [
+        "wannacry_sample.exe"
+      ],
+      "negative": [
+        "clean_application.exe"
+      ]
+    },
+    {
+      "rule": "ransomware_behavior_indicators",
+      "positive": [
+        "lockbit_sample.exe"
+      ],
+      "negative": [
+        "clean_application.exe"
+      ]
+    },
+    {
+      "rule": "c2_network_beaconing",
+      "positive": [
+        "cobalt_strike_beacon.exe"
+      ],
+      "negative": [
+        "clean_application.exe"
+      ]
+    },
+    {
+      "rule": "registry_run_keys_persistence",
+      "positive": [
+        "redline_stealer.exe"
+      ],
+      "negative": [
+        "clean_application.exe"
+      ]
+    },
+    {
+      "rule": "packed_pe_indicators",
+      "positive": [
+        "upx_packed_sample.exe"
+      ],
+      "negative": [
+        "clean_application.exe"
+      ]
+    },
+    {
+      "rule": "mirai_botnet",
+      "positive": [
+        "mirai_sample.elf"
+      ],
+      "negative": [
+        "clean_application.exe"
+      ]
+    },
+    {
+      "rule": "eicar_standard_test_file",
+      "positive": [
+        "eicar.com"
+      ],
+      "negative": [
+        "clean_application.exe"
       ]
     }
   ]

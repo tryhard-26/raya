@@ -81,5 +81,7 @@ fn test_cli_test_suite_runner() {
     assert!(output.status.success());
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(stdout.contains("Coverage:        100.0%"));
-    assert!(stdout.contains("Passed:          4"));
+    assert!(stdout.contains("Failed:          0"));
+    assert!(stdout.contains("False Positives: 0"));
+    assert!(stdout.contains("False Negatives: 0"));
 }

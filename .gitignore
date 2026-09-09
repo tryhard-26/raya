@@ -24,6 +24,14 @@ samples/benign/*
 !samples/manifest.json
 *.infected
 *.malware
+*.rc
+tests/fixtures/*.exe
+tests/fixtures/*.elf
+tests/fixtures/*.dat
+!tests/fixtures/clean_application.exe
+!tests/fixtures/corrupted_pe.exe
+!tests/fixtures/sample_injection.exe
+!tests/fixtures/high_entropy_benign.dat
 
 # Internal specifications & PRD
 [rR][aA][yY][aA].[mM][dD]

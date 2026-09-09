@@ -105,4 +105,29 @@ mod tests {
         let rules = parse_rules_from_str(source).expect("Should parse PE expressions and counts");
         assert_eq!(rules.len(), 1);
     }
+
+    #[test]
+    fn test_parse_yara_compatibility() {
+        let yara_source = r#"
+            import "pe"
+
+            rule Yara_Compat_Rule : apt malware {
+                meta:
+                    author = "Threat Hunter"
+                    description = "YARA compatibility test rule"
+                strings:
+                    $mz = "MZ"
+                    $admin = "admin" fullword ascii
+                    $hex = { 55 8B EC ?? ?? }
+                condition:
+                    uint16(0) == 0x5a4d and $mz at 0 and ($admin or $hex)
+            }
+        "#;
+
+        let rules = parse_rules_from_str(yara_source).expect("Should parse standard YARA rule");
+        assert_eq!(rules.len(), 1);
+        assert_eq!(rules[0].name, "Yara_Compat_Rule");
+        assert_eq!(rules[0].tags, vec!["apt", "malware"]);
+        assert_eq!(rules[0].strings.len(), 3);
+    }
 }

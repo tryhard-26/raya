@@ -95,11 +95,23 @@ Scan an individual sample or an entire directory:
 # Scan a single file using the starter rule pack
 raya scan samples/malware.exe --rules rules/
 
-# Recursively scan a directory in parallel
+# Scan streaming bytes from standard input (UNIX pipe)
+cat payload.bin | raya scan -
+
+# Recursively scan a directory in parallel with zero-copy memmap2
 raya scan ./samples/ --rules rules/ --recursive
 
 # Output machine-readable JSON for SIEM/orchestration pipelines
 raya scan ./samples/ --rules rules/ --json
+
+# Export standardized OASIS SARIF v2.1.0 for GitHub Security & CI/CD
+raya scan ./samples/ --rules rules/ --format sarif
+
+# Export OASIS STIX 2.1 Threat Intel Bundle (indicators & observed files)
+raya scan ./samples/ --rules rules/ --format stix
+
+# Scan live virtual memory of a running process (requires elevated privileges)
+raya scan --pid 1337 --rules rules/
 
 # Quiet mode for shell scripting (outputs <path>: <rule> on detection)
 raya scan ./samples/ --rules rules/ --quiet
@@ -113,6 +125,18 @@ raya scan ./samples/ --rules rules/ --tag injection
 * `0`: Clean (no rules matched)
 * `1`: Detection (one or more rules triggered)
 * `2`: Execution error (file unreadable, invalid rule syntax)
+
+### 2. Pre-compiled Rule Cache (`raya compile`)
+
+Pre-compile rule collections into a high-performance binary cache (`.rc`) for sub-millisecond rule loading:
+
+```bash
+# Compile rules into a binary cache
+raya compile rules/ -o rules.rc
+
+# Scan using the pre-compiled binary rule cache
+raya scan samples/malware.exe -R rules.rc
+```
 
 ### 2. Rule Validation (`raya check`)
 
@@ -220,6 +244,9 @@ rule process_injection : windows injection malware {
   * `pe.is_pe`: Boolean indicating if target is a valid Portable Executable.
   * `pe.is_pe32_plus`: True for 64-bit PE32+ executables.
   * `pe.is_dll`: True if file is a dynamic link library.
+  * `pe.is_signed`: True if file contains an Authenticode PKCS#7 digital signature.
+  * `pe.has_rich_header`: True if Microsoft Rich Header compiler fingerprint is present.
+  * `pe.has_rich_comp_id(30729)`: Matches compiler build ID in decrypted Rich Header.
   * `pe.number_of_sections`: Total number of sections.
   * `pe.has_rwx`: True if any section has Read-Write-Execute permissions.
   * `pe.import("kernel32.dll", "VirtualAllocEx")`: True if function is imported.
@@ -232,6 +259,19 @@ rule process_injection : windows injection malware {
   * `elf.is_64`: True for 64-bit ELF.
   * `elf.is_executable`: True for ET_EXEC binaries.
   * `elf.section(".text").executable`: Section permission flag check.
+* **Mach-O Executable Awareness (`macho.*`):**
+  * `macho.is_macho`: Boolean indicating if target is a valid Mach-O binary.
+  * `macho.is_64`: True for 64-bit Mach-O (`0xFEEDFACF`).
+  * `macho.is_fat`: True for Universal / FAT multi-architecture binaries (`0xCAFEBABE`).
+  * `macho.is_signed`: True if file contains an embedded code signature (`LC_CODE_SIGNATURE`).
+  * `macho.has_dylib("libSystem.B.dylib")`: Matches imported dynamic libraries (`LC_LOAD_DYLIB`).
+  * `macho.has_segment("__TEXT")`: True if segment is defined.
+  * `macho.has_section("__TEXT", "__text")`: True if specific section is present.
+* **Entropy & Pattern Analysis:**
+  * `entropy`: Global Shannon entropy across whole target ($0.0 - 8.0$).
+  * `entropy.max_window_exceeds(512, 7.5)`: Sliding-window entropy exceeding threshold in any 512-byte cave.
+  * `uint16(0) == 0x5a4d`: YARA-compatible byte inspection at file offset.
+  * `$mz at 0`: Offset assertion for pattern match.
 * **Global Target Attributes:**
   * `filesize`: File size in bytes (e.g., `filesize > 10MB`).
   * `entropy`: Whole-file Shannon entropy (0.0 to 8.0).

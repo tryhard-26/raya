@@ -1,0 +1,25 @@
+# Dockerfile for isolated, sandboxed malware scanning with Raya
+# Provides an isolated container environment with network disabled.
+
+FROM rust:1.80-slim AS builder
+WORKDIR /build
+COPY Cargo.toml Cargo.lock ./
+COPY src ./src
+RUN cargo build --release
+
+FROM debian:bookworm-slim
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    p7zip-full \
+    unzip \
+    ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /analyzer
+COPY --from=builder /build/target/release/raya /usr/local/bin/raya
+COPY rules ./rules
+
+# Mount malware samples into /samples
+# Execution should be performed with:
+#   docker run --rm --network none -v /path/to/samples:/samples:ro raya-sandbox scan /samples --rules /analyzer/rules --recursive
+ENTRYPOINT ["/usr/local/bin/raya"]
+CMD ["--help"]

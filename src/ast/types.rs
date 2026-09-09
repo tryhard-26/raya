@@ -45,7 +45,6 @@ impl std::str::FromStr for Severity {
 }
 
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
-#[serde(untagged)]
 pub enum MetaValue {
     String(String),
     Integer(i64),
@@ -64,7 +63,7 @@ impl fmt::Display for MetaValue {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum HexToken {
     Exact(u8),
     Wildcard,          // ??
@@ -72,7 +71,7 @@ pub enum HexToken {
     LowNibble(u8),     // e.g. ?8
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum StringPattern {
     Literal {
         bytes: Vec<u8>,
@@ -89,13 +88,13 @@ pub enum StringPattern {
     },
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct StringDefinition {
     pub id: String,
     pub pattern: StringPattern,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum BinaryOperator {
     Eq,
     Neq,
@@ -109,14 +108,14 @@ pub enum BinaryOperator {
     Div,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum SetSelector {
     Them,
     Wildcard(String),
     List(Vec<String>),
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum Expr {
     Boolean(bool),
     Integer(i64),
@@ -153,7 +152,7 @@ pub enum Expr {
     Variable(String),
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
 pub struct SourceLocation {
     pub line: usize,
     pub column: usize,
@@ -165,7 +164,7 @@ impl fmt::Display for SourceLocation {
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct Rule {
     pub name: String,
     pub tags: Vec<String>,

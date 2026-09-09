@@ -1,21 +1,25 @@
 use crate::ast::Severity;
+use crate::cli::compile::load_or_compile_rules;
+use crate::cli::process::scan_process_memory;
 use crate::engine::Engine;
-use crate::parser::parse_rules_from_file;
-use crate::report::ScanResult;
+use crate::report::{to_sarif, to_stix, ScanResult};
 use colored::Colorize;
 use rayon::prelude::*;
+use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 use walkdir::WalkDir;
 
 pub struct ScanArgs {
-    pub target: PathBuf,
+    pub target: Option<PathBuf>,
     pub rules: Option<PathBuf>,
     pub recursive: bool,
     pub json: bool,
     pub quiet: bool,
     pub tag: Option<String>,
     pub threads: Option<usize>,
+    pub pid: Option<u32>,
+    pub format: Option<String>,
 }
 
 pub fn run_scan(args: ScanArgs) -> i32 {
@@ -24,71 +28,23 @@ pub fn run_scan(args: ScanArgs) -> i32 {
         .clone()
         .unwrap_or_else(|| PathBuf::from("rules"));
 
-    let mut rule_files = Vec::new();
-    if rules_dir.is_file() {
-        rule_files.push(rules_dir.clone());
-    } else if rules_dir.is_dir() {
-        for entry in WalkDir::new(&rules_dir).into_iter().filter_map(|e| e.ok()) {
-            if entry.path().is_file() {
-                if let Some(ext) = entry.path().extension() {
-                    if ext == "raya" || ext == "yar" || ext == "yara" {
-                        rule_files.push(entry.path().to_path_buf());
-                    }
+    let engine = match load_or_compile_rules(&rules_dir) {
+        Ok(mut eng) => {
+            if let Some(ref target_tag) = args.tag {
+                eng.rules.retain(|r| r.rule.tags.iter().any(|t| t.eq_ignore_ascii_case(target_tag)));
+                if eng.rules.is_empty() {
+                    eprintln!(
+                        "{} No rules matched tag '{}'.",
+                        "WARNING:".yellow().bold(),
+                        target_tag
+                    );
+                    return 0;
                 }
             }
+            eng
         }
-    } else {
-        eprintln!(
-            "{} Rules path '{}' does not exist.",
-            "ERROR:".red().bold(),
-            rules_dir.display()
-        );
-        return 2;
-    }
-
-    if rule_files.is_empty() {
-        eprintln!(
-            "{} No rule files (.raya, .yar, .yara) found in '{}'.",
-            "ERROR:".red().bold(),
-            rules_dir.display()
-        );
-        return 2;
-    }
-
-    // Parse all rules
-    let mut parsed_rules = Vec::new();
-    for rf in &rule_files {
-        match parse_rules_from_file(rf) {
-            Ok(rules) => parsed_rules.extend(rules),
-            Err(e) => {
-                eprintln!(
-                    "{} Failed to parse '{}': {}",
-                    "ERROR:".red().bold(),
-                    rf.display(),
-                    e
-                );
-                return 2;
-            }
-        }
-    }
-
-    // Filter by tag if requested
-    if let Some(ref target_tag) = args.tag {
-        parsed_rules.retain(|r| r.tags.iter().any(|t| t.eq_ignore_ascii_case(target_tag)));
-        if parsed_rules.is_empty() {
-            eprintln!(
-                "{} No rules matched tag '{}'.",
-                "WARNING:".yellow().bold(),
-                target_tag
-            );
-            return 0;
-        }
-    }
-
-    let engine = match Engine::compile_rules(parsed_rules) {
-        Ok(eng) => eng,
         Err(e) => {
-            eprintln!("{} Failed to compile rules: {}", "ERROR:".red().bold(), e);
+            eprintln!("{} {}", "ERROR:".red().bold(), e);
             return 2;
         }
     };
@@ -99,21 +55,47 @@ pub fn run_scan(args: ScanArgs) -> i32 {
             .build_global();
     }
 
-    if args.target.is_file() {
-        scan_single_file(&engine, &args.target, args.json, args.quiet)
-    } else if args.target.is_dir() {
-        scan_directory(&engine, &args.target, args.recursive, args.json, args.quiet)
+    // Process memory scan if PID provided
+    if let Some(pid) = args.pid {
+        return scan_process_memory(&engine, pid, args.json, args.quiet, args.format.as_deref());
+    }
+
+    // Check target: stdin vs file vs directory
+    let target = match args.target {
+        Some(ref t) if t == Path::new("-") => {
+            return scan_stdin(&engine, args.json, args.quiet, args.format.as_deref());
+        }
+        Some(t) => t,
+        None => {
+            return scan_stdin(&engine, args.json, args.quiet, args.format.as_deref());
+        }
+    };
+
+    if target.is_file() {
+        scan_single_file(&engine, &target, args.json, args.quiet, args.format.as_deref())
+    } else if target.is_dir() {
+        scan_directory(&engine, &target, args.recursive, args.json, args.quiet, args.format.as_deref())
     } else {
         eprintln!(
             "{} Target '{}' does not exist.",
             "ERROR:".red().bold(),
-            args.target.display()
+            target.display()
         );
         2
     }
 }
 
-fn scan_single_file(engine: &Engine, path: &Path, json: bool, quiet: bool) -> i32 {
+fn scan_stdin(engine: &Engine, json: bool, quiet: bool, format: Option<&str>) -> i32 {
+    let mut buffer = Vec::new();
+    if let Err(e) = std::io::stdin().read_to_end(&mut buffer) {
+        eprintln!("{} Failed to read stdin: {}", "ERROR:".red().bold(), e);
+        return 2;
+    }
+    let result = engine.scan_bytes(&buffer, "stdin");
+    render_single_result(&result, json, quiet, format)
+}
+
+fn scan_single_file(engine: &Engine, path: &Path, json: bool, quiet: bool, format: Option<&str>) -> i32 {
     let result = match engine.scan_file(path) {
         Ok(res) => res,
         Err(e) => {
@@ -127,22 +109,45 @@ fn scan_single_file(engine: &Engine, path: &Path, json: bool, quiet: bool) -> i3
         }
     };
 
-    if json {
-        match result.to_json(true) {
+    render_single_result(&result, json, quiet, format)
+}
+
+fn render_single_result(result: &ScanResult, json: bool, quiet: bool, format: Option<&str>) -> i32 {
+    let fmt = format.unwrap_or(if json { "json" } else { "text" });
+
+    match fmt {
+        "sarif" => match to_sarif(std::slice::from_ref(result)) {
+            Ok(s) => println!("{}", s),
+            Err(e) => {
+                eprintln!("{} Failed to serialize SARIF: {}", "ERROR:".red().bold(), e);
+                return 2;
+            }
+        },
+        "stix" => match to_stix(std::slice::from_ref(result)) {
+            Ok(s) => println!("{}", s),
+            Err(e) => {
+                eprintln!("{} Failed to serialize STIX: {}", "ERROR:".red().bold(), e);
+                return 2;
+            }
+        },
+        "json" => match result.to_json(true) {
             Ok(j) => println!("{}", j),
             Err(e) => {
                 eprintln!("{} Failed to serialize JSON: {}", "ERROR:".red().bold(), e);
                 return 2;
             }
-        }
-    } else if quiet {
-        if result.has_matches() {
-            for m in &result.matches {
-                println!("{}: {}", result.target, m.rule);
+        },
+        _ => {
+            if quiet {
+                if result.has_matches() {
+                    for m in &result.matches {
+                        println!("{}: {}", result.target, m.rule);
+                    }
+                }
+            } else {
+                print!("{}", result.render_terminal());
             }
         }
-    } else {
-        print!("{}", result.render_terminal());
     }
 
     if result.has_matches() {
@@ -158,6 +163,7 @@ fn scan_directory(
     recursive: bool,
     json: bool,
     quiet: bool,
+    format: Option<&str>,
 ) -> i32 {
     let start_time = Instant::now();
     let walker = if recursive {
@@ -187,6 +193,7 @@ fn scan_directory(
     let elapsed = start_time.elapsed();
 
     let mut matched_results = Vec::new();
+    let mut all_results = Vec::new();
     let mut errors = Vec::new();
     let mut critical_count = 0;
     let mut high_count = 0;
@@ -207,8 +214,9 @@ fn scan_directory(
                             Severity::Info => info_count += 1,
                         }
                     }
-                    matched_results.push(res);
+                    matched_results.push(res.clone());
                 }
+                all_results.push(res);
             }
             Err((path, err)) => {
                 errors.push((path, err));
@@ -216,71 +224,86 @@ fn scan_directory(
         }
     }
 
-    if json {
-        let json_val = serde_json::json!({
-            "directory": dir.display().to_string(),
-            "total_files": total_files,
-            "matched_files": matched_results.len(),
-            "errors": errors.len(),
-            "scan_time_ms": elapsed.as_secs_f64() * 1000.0,
-            "severities": {
-                "critical": critical_count,
-                "high": high_count,
-                "medium": medium_count,
-                "low": low_count,
-                "info": info_count,
-            },
-            "matches": matched_results,
-        });
-        println!("{}", serde_json::to_string_pretty(&json_val).unwrap_or_default());
-    } else if quiet {
-        for res in &matched_results {
-            for m in &res.matches {
-                println!("{}: {}", res.target, m.rule);
-            }
-        }
-    } else {
-        println!("\n=== Scan Summary for '{}' ===", dir.display().to_string().bold());
-        println!("Files scanned:  {}", total_files);
-        println!(
-            "Matches:        {} file(s)",
-            if !matched_results.is_empty() {
-                matched_results.len().to_string().red().bold()
-            } else {
-                "0".green()
-            }
-        );
-        if critical_count > 0 {
-            println!("  Critical:     {}", critical_count.to_string().on_red().white().bold());
-        }
-        if high_count > 0 {
-            println!("  High:         {}", high_count.to_string().red().bold());
-        }
-        if medium_count > 0 {
-            println!("  Medium:       {}", medium_count.to_string().yellow().bold());
-        }
-        if low_count > 0 {
-            println!("  Low:          {}", low_count.to_string().blue());
-        }
-        if info_count > 0 {
-            println!("  Info:         {}", info_count.to_string().cyan());
-        }
-        if !errors.is_empty() {
-            println!("Errors:         {}", errors.len().to_string().red());
-        }
-        println!("Scan time:      {:.2?}", elapsed);
+    let fmt = format.unwrap_or(if json { "json" } else { "text" });
 
-        if !matched_results.is_empty() {
-            println!("\n=== Detections ===");
-            for res in &matched_results {
-                println!("\n{}", res.render_terminal());
+    match fmt {
+        "sarif" => {
+            match to_sarif(&matched_results) {
+                Ok(s) => println!("{}", s),
+                Err(e) => {
+                    eprintln!("{} Failed to serialize SARIF: {}", "ERROR:".red().bold(), e);
+                    return 2;
+                }
+            }
+        }
+        "stix" => {
+            match to_stix(&matched_results) {
+                Ok(s) => println!("{}", s),
+                Err(e) => {
+                    eprintln!("{} Failed to serialize STIX: {}", "ERROR:".red().bold(), e);
+                    return 2;
+                }
+            }
+        }
+        "json" => {
+            match serde_json::to_string_pretty(&matched_results) {
+                Ok(j) => println!("{}", j),
+                Err(e) => {
+                    eprintln!("{} Failed to serialize JSON: {}", "ERROR:".red().bold(), e);
+                    return 2;
+                }
+            }
+        }
+        _ => {
+            if quiet {
+                for res in &matched_results {
+                    for m in &res.matches {
+                        println!("{}: {}", res.target, m.rule);
+                    }
+                }
+            } else {
+                for res in &matched_results {
+                    print!("{}", res.render_terminal());
+                }
+
+                println!("\n{}", "=== Scan Summary ===".bold());
+                println!("Files scanned:  {}", total_files);
+                println!(
+                    "Matches:        {}",
+                    if matched_results.is_empty() {
+                        "0 file(s)".green().bold()
+                    } else {
+                        format!("{} file(s)", matched_results.len()).red().bold()
+                    }
+                );
+                if !matched_results.is_empty() {
+                    println!(
+                        "Severity:       {} critical, {} high, {} medium, {} low, {} info",
+                        critical_count.to_string().red().bold(),
+                        high_count.to_string().bright_red().bold(),
+                        medium_count.to_string().yellow().bold(),
+                        low_count.to_string().blue(),
+                        info_count.to_string().cyan()
+                    );
+                }
+                println!("Scan duration:  {:.3}s", elapsed.as_secs_f64());
+
+                if !errors.is_empty() {
+                    println!("\n{} Encountered {} file read error(s):", "WARNING:".yellow().bold(), errors.len());
+                    for (path, err) in errors.iter().take(5) {
+                        println!("  {}: {}", path.display(), err);
+                    }
+                    if errors.len() > 5 {
+                        println!("  ... and {} more", errors.len() - 5);
+                    }
+                }
             }
         }
     }
 
-    if !matched_results.is_empty() {
-        1
-    } else {
+    if matched_results.is_empty() {
         0
+    } else {
+        1
     }
 }

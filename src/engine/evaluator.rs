@@ -186,6 +186,9 @@ impl<'a, 'b> Evaluator<'a, 'b> {
             Expr::Variable(var) => match var.as_str() {
                 "filesize" => EvalValue::Int(self.context.file_size as i64),
                 "entropy" => EvalValue::Float(self.context.entropy),
+                "is_pe" => EvalValue::Bool(self.context.binary.pe.is_some()),
+                "is_elf" => EvalValue::Bool(self.context.binary.elf.is_some()),
+                "is_macho" => EvalValue::Bool(self.context.binary.macho.is_some()),
                 _ => EvalValue::None,
             },
         }
@@ -377,6 +380,16 @@ impl<'a, 'b> Evaluator<'a, 'b> {
                             }
                         }
                     }
+                    "has_rich_comp_id" => {
+                        if let Some(EvalValue::Int(id)) = evaluated_args.first() {
+                            return EvalValue::Bool(pe.has_rich_comp_id(*id as u16));
+                        }
+                    }
+                    "has_rich_product_id" => {
+                        if let Some(EvalValue::Int(id)) = evaluated_args.first() {
+                            return EvalValue::Bool(pe.has_rich_product_id(*id as u16));
+                        }
+                    }
                     _ => {}
                 }
             }
@@ -391,6 +404,87 @@ impl<'a, 'b> Evaluator<'a, 'b> {
                         }
                     }
                 }
+            }
+        }
+
+        if module == "macho" || module.is_empty() {
+            if let Some(macho) = &self.context.binary.macho {
+                match function {
+                    "has_dylib" => {
+                        if let Some(EvalValue::Str(dylib)) = evaluated_args.first() {
+                            return EvalValue::Bool(macho.has_dylib(dylib));
+                        }
+                    }
+                    "has_segment" => {
+                        if let Some(EvalValue::Str(seg)) = evaluated_args.first() {
+                            return EvalValue::Bool(macho.get_segment(seg).is_some());
+                        }
+                    }
+                    "has_section" => {
+                        if evaluated_args.len() >= 2 {
+                            if let (EvalValue::Str(seg), EvalValue::Str(sec)) = (&evaluated_args[0], &evaluated_args[1]) {
+                                return EvalValue::Bool(macho.get_section(seg, sec).is_some());
+                            }
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        }
+
+        if module == "entropy" {
+            match function {
+                "max_window" => {
+                    let window_size = match evaluated_args.first() {
+                        Some(EvalValue::Int(w)) => (*w).max(1) as usize,
+                        _ => 512,
+                    };
+                    let (max_ent, _) = crate::entropy::max_window_entropy(self.context.data, window_size);
+                    return EvalValue::Float(max_ent);
+                }
+                "max_window_exceeds" => {
+                    let window_size = match evaluated_args.first() {
+                        Some(EvalValue::Int(w)) => (*w).max(1) as usize,
+                        _ => 512,
+                    };
+                    let threshold = match evaluated_args.get(1) {
+                        Some(EvalValue::Float(f)) => *f,
+                        Some(EvalValue::Int(i)) => *i as f64,
+                        _ => 7.0,
+                    };
+                    let (max_ent, _) = crate::entropy::max_window_entropy(self.context.data, window_size);
+                    return EvalValue::Bool(max_ent >= threshold);
+                }
+                _ => {}
+            }
+        }
+
+        if module.is_empty() {
+            match function {
+                "uint16" => {
+                    if let Some(EvalValue::Int(offset)) = evaluated_args.first() {
+                        let off = *offset as usize;
+                        if off + 2 <= self.context.data.len() {
+                            let val = u16::from_le_bytes([self.context.data[off], self.context.data[off + 1]]);
+                            return EvalValue::Int(val as i64);
+                        }
+                    }
+                }
+                "uint32" => {
+                    if let Some(EvalValue::Int(offset)) = evaluated_args.first() {
+                        let off = *offset as usize;
+                        if off + 4 <= self.context.data.len() {
+                            let val = u32::from_le_bytes([
+                                self.context.data[off],
+                                self.context.data[off + 1],
+                                self.context.data[off + 2],
+                                self.context.data[off + 3],
+                            ]);
+                            return EvalValue::Int(val as i64);
+                        }
+                    }
+                }
+                _ => {}
             }
         }
 
@@ -458,6 +552,9 @@ impl<'a, 'b> Evaluator<'a, 'b> {
                                 "number_of_sections" => EvalValue::Int(pe.number_of_sections as i64),
                                 "entry_point" => EvalValue::Int(pe.entry_point as i64),
                                 "has_rwx" => EvalValue::Bool(pe.has_rwx_section()),
+                                "is_signed" => EvalValue::Bool(pe.is_signed),
+                                "has_rich_header" => EvalValue::Bool(pe.has_rich_header),
+                                "security_dir_size" => EvalValue::Int(pe.security_dir_size as i64),
                                 _ => EvalValue::None,
                             };
                         } else {
@@ -472,6 +569,22 @@ impl<'a, 'b> Evaluator<'a, 'b> {
                                 "is_shared_object" => EvalValue::Bool(elf.is_shared_object),
                                 "number_of_sections" => EvalValue::Int(elf.number_of_sections as i64),
                                 "entry_point" => EvalValue::Int(elf.entry_point as i64),
+                                _ => EvalValue::None,
+                            };
+                        } else {
+                            return EvalValue::Bool(false);
+                        }
+                    } else if var_name == "macho" {
+                        if let Some(macho) = &self.context.binary.macho {
+                            return match property {
+                                "is_macho" => EvalValue::Bool(macho.is_macho),
+                                "is_64" => EvalValue::Bool(macho.is_64),
+                                "is_fat" => EvalValue::Bool(macho.is_fat),
+                                "is_signed" => EvalValue::Bool(macho.is_signed),
+                                "number_of_commands" => EvalValue::Int(macho.number_of_commands as i64),
+                                "number_of_segments" => EvalValue::Int(macho.segments.len() as i64),
+                                "entry_point" => EvalValue::Int(macho.entry_point as i64),
+                                "cpu_type" => EvalValue::Int(macho.cpu_type as i64),
                                 _ => EvalValue::None,
                             };
                         } else {
