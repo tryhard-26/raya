@@ -6,6 +6,8 @@ authors = ["Raya Core Team"]
 description = "Rust-native malware detection and binary pattern-matching engine"
 readme = "README.md"
 license = "Apache-2.0"
+repository = "https://github.com/tryhard-26/raya"
+homepage = "https://github.com/tryhard-26/raya"
 keywords = ["malware-analysis", "yara", "security", "pattern-matching", "pe-analysis"]
 categories = ["command-line-utilities", "development-tools::profiling"]
 
