@@ -410,19 +410,17 @@ impl<'a, 'b> Evaluator<'a, 'b> {
             if let Some(pe) = &self.context.binary.pe {
                 match function {
                     "import" => {
-                        if evaluated_args.len() >= 2 {
-                            if let (EvalValue::Str(dll), EvalValue::Str(func)) =
-                                (&evaluated_args[0], &evaluated_args[1])
-                            {
-                                let matched = pe.has_import(dll, func);
-                                if matched {
-                                    self.context.record_evidence(MatchedEvidence::PeImport {
-                                        dll: dll.clone(),
-                                        function: func.clone(),
-                                    });
-                                }
-                                return EvalValue::Bool(matched);
+                        if let [EvalValue::Str(dll), EvalValue::Str(func), ..] =
+                            evaluated_args.as_slice()
+                        {
+                            let matched = pe.has_import(dll, func);
+                            if matched {
+                                self.context.record_evidence(MatchedEvidence::PeImport {
+                                    dll: dll.clone(),
+                                    function: func.clone(),
+                                });
                             }
+                            return EvalValue::Bool(matched);
                         }
                     }
                     "export" => {
@@ -560,28 +558,25 @@ impl<'a, 'b> Evaluator<'a, 'b> {
                         }
                     }
                     "api_call_arg" | "api_call_with_arg" => {
-                        if evaluated_args.len() >= 2 {
-                            if let (EvalValue::Str(api_name), EvalValue::Int(target_val)) =
-                                (&evaluated_args[0], &evaluated_args[1])
-                            {
-                                if let Some(hit) = pe.detect_api_call_arg(
-                                    self.context.data,
-                                    api_name,
-                                    *target_val as u64,
-                                ) {
-                                    self.context.record_evidence(
-                                        MatchedEvidence::ApiCallArgument {
-                                            api: hit.api_name,
-                                            argument_name: hit.argument_name,
-                                            value: hit.value,
-                                            constant_name: hit.constant_name,
-                                            address: hit.call_ip,
-                                        },
-                                    );
-                                    return EvalValue::Bool(true);
-                                }
-                                return EvalValue::Bool(false);
+                        if let [EvalValue::Str(api_name), EvalValue::Int(target_val), ..] =
+                            evaluated_args.as_slice()
+                        {
+                            if let Some(hit) = pe.detect_api_call_arg(
+                                self.context.data,
+                                api_name,
+                                *target_val as u64,
+                            ) {
+                                self.context
+                                    .record_evidence(MatchedEvidence::ApiCallArgument {
+                                        api: hit.api_name,
+                                        argument_name: hit.argument_name,
+                                        value: hit.value,
+                                        constant_name: hit.constant_name,
+                                        address: hit.call_ip,
+                                    });
+                                return EvalValue::Bool(true);
                             }
+                            return EvalValue::Bool(false);
                         }
                     }
                     "in_basic_block" | "has_basic_block" => {
@@ -656,12 +651,10 @@ impl<'a, 'b> Evaluator<'a, 'b> {
                         }
                     }
                     "has_section" => {
-                        if evaluated_args.len() >= 2 {
-                            if let (EvalValue::Str(seg), EvalValue::Str(sec)) =
-                                (&evaluated_args[0], &evaluated_args[1])
-                            {
-                                return EvalValue::Bool(macho.get_section(seg, sec).is_some());
-                            }
+                        if let [EvalValue::Str(seg), EvalValue::Str(sec), ..] =
+                            evaluated_args.as_slice()
+                        {
+                            return EvalValue::Bool(macho.get_section(seg, sec).is_some());
                         }
                     }
                     _ => {}
