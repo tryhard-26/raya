@@ -1,75 +1,38 @@
 # Raya
 
-Rust-native malware detection and binary pattern-matching engine.
+Rust-native binary pattern matching and static triage engine.
 
-* **crates.io:** [crates.io/crates/raya](https://crates.io/crates/raya)
-* **Repository:** [github.com/tryhard-26/raya](https://github.com/tryhard-26/raya)
-* **License:** Apache-2.0
+[![Crates.io](https://img.shields.io/crates/v/raya.svg)](https://crates.io/crates/raya)
+[![Documentation](https://img.shields.io/badge/docs-raya-blue.svg)](docs/index.md)
+[![License: Apache-2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
+[![CI](https://github.com/tryhard-26/raya/actions/workflows/ci.yml/badge.svg)](https://github.com/tryhard-26/raya/actions)
 
-Raya is a static detection and binary pattern-matching engine engineered in Rust. It combines multi-pattern byte matching, regular expressions, deep Portable Executable (PE32/PE32+) and Executable and Linkable Format (ELF32/ELF64) inspection, x86/x64 instruction disassembly (`iced-x86`), and Shannon entropy calculation.
+Raya is a static analysis and binary pattern-matching engine implemented in Rust. It compiles pattern signatures and condition expressions into an Aho-Corasick automaton combined with regular expressions, x86/x64 linear disassembly via `iced-x86`, and executable file parsers for PE, ELF, and Mach-O.
 
-Every match produces an evidence trace detailing the exact string offsets, imported APIs, section flags, and entropy metrics that satisfied the rule conditions.
+The engine is designed for security operations pipelines, automated artifact triage, and reverse engineering. Detections produce structured evidence containing exact byte offsets, imported symbols, section characteristics, and disassembled instruction arguments.
 
 ---
 
-## Architectural Overview
+## Technical Overview
 
-```
-                      ┌────────────────────────┐
-                      │        Raya CLI        │
-                      │ scan | check | test ...│
-                      └───────────┬────────────┘
-                                  │
-           ┌──────────────────────┴──────────────────────┐
-           ▼                                             ▼
-┌──────────────────────┐                      ┌──────────────────────┐
-│     Rule Parser      │                      │     Target File      │
-│ Lexer & Pratt Parser │                      │  Format Det. / Hash  │
-└──────────┬───────────┘                      └──────────┬───────────┘
-           ▼                                             ▼
-┌──────────────────────┐                      ┌──────────────────────┐
-│    Compiled Rules    │                      │ Binary Context (AST) │
-│ Strings / Conditions │                      │  PE / ELF / Entropy  │
-└──────────┬───────────┘                      └──────────┬───────────┘
-           │                                             │
-           └──────────────────────┬──────────────────────┘
-                                  ▼
-                      ┌────────────────────────┐
-                      │    Scanning Engine     │
-                      │  Aho-Corasick / Regex  │
-                      │   Evaluator & Trace    │
-                      └───────────┬────────────┘
-                                  ▼
-                      ┌────────────────────────┐
-                      │    Detection Report    │
-                      │ Terminal (Ev.) / JSON  │
-                      └────────────────────────┘
-```
-
-### Core Tenets
-
-* **Zero-Panic Resilience:** All binary format decoders (PE, ELF) implement explicit bounds checking. Malformed, truncated, or deliberately corrupted files return safe diagnostics rather than aborting.
-* **Extension-Independent Format Detection:** Files are classified based on authoritative magic bytes (`MZ` + `PE\0\0`, `\x7fELF`), preventing evasions through renaming (e.g., `payload.exe` named `image.png`).
-* **High-Throughput Multi-Pattern Matching:** Literal patterns are matched via Aho-Corasick automata in single-pass linear time. Hex wildcards and regular expressions utilize byte-oriented finite automata.
-* **Concurrency:** Recursive directory scans traverse files in parallel using work-stealing threads (`rayon`).
+* **Multi-Pattern Matching**: Compiles literal strings across all loaded rules into a single-pass Aho-Corasick automaton, executing alongside PCRE-compatible regular expressions and hex byte patterns with wildcard masks.
+* **Executable Format Parsers**: Native zero-copy parsing for PE32/PE32+, ELF32/ELF64, and Mach-O (32-bit, 64-bit, and Universal/FAT) binaries. Extracts section headers, entropy, import/export tables, TLS callbacks, and permission flags (e.g. RWX).
+* **Basic-Block Instruction Scoping**: Linear disassembly using `iced-x86`. Evaluates instruction sequences within single basic blocks, bounded by branch, jump, and call boundaries.
+* **Static API Argument Tracking**: Identifies arguments supplied to imported APIs within basic blocks prior to call instructions (e.g. `PAGE_EXECUTE_READWRITE` / `0x40` passed to memory allocation primitives).
+* **In-Memory Archive Extraction**: Decompresses and decrypts ZIP archives (ZipCrypto and AES-256) in memory without writing extracted payloads to disk.
+* **Standardized Output**: Native formatting for terminal display, JSON, OASIS SARIF v2.1.0, and OASIS STIX 2.1 threat intelligence bundles.
 
 ---
 
 ## Installation
 
-### Install via Cargo (crates.io)
+### From Crates.io
 
 ```bash
 cargo install raya
 ```
 
-### Install from Git
-
-```bash
-cargo install --git https://github.com/tryhard-26/raya.git
-```
-
-### Build from Source
+### From Source
 
 ```bash
 git clone https://github.com/tryhard-26/raya.git
@@ -77,291 +40,230 @@ cd raya
 cargo build --release
 ```
 
-The optimized binary will be in `target/release/raya`. To install locally:
-
-```bash
-cargo install --path .
-```
+The compiled binary is located at `target/release/raya`.
 
 ---
 
-## CLI Reference
+## Command-Line Interface
 
-### 1. File & Directory Scanning (`raya scan`)
+### Usage
 
-Scan an individual sample or an entire directory:
-
-```bash
-# Scan a single file using the starter rule pack
-raya scan samples/malware.exe --rules rules/
-
-# Scan streaming bytes from standard input (UNIX pipe)
-cat payload.bin | raya scan -
-
-# Recursively scan a directory in parallel with zero-copy memmap2
-raya scan ./samples/ --rules rules/ --recursive
-
-# Output machine-readable JSON for SIEM/orchestration pipelines
-raya scan ./samples/ --rules rules/ --json
-
-# Export standardized OASIS SARIF v2.1.0 for GitHub Security & CI/CD
-raya scan ./samples/ --rules rules/ --format sarif
-
-# Export OASIS STIX 2.1 Threat Intel Bundle (indicators & observed files)
-raya scan ./samples/ --rules rules/ --format stix
-
-# Scan live virtual memory of a running process (requires elevated privileges)
-raya scan --pid 1337 --rules rules/
-
-# Quiet mode for shell scripting (outputs <path>: <rule> on detection)
-raya scan ./samples/ --rules rules/ --quiet
-
-# Filter rules by tag
-raya scan ./samples/ --rules rules/ --tag injection
+```text
+raya [OPTIONS] <COMMAND>
 ```
 
-**Exit Codes:**
+### Commands
 
-* `0`: Clean (no rules matched)
-* `1`: Detection (one or more rules triggered)
-* `2`: Execution error (file unreadable, invalid rule syntax)
+| Command | Arguments | Description |
+| :--- | :--- | :--- |
+| `scan` | `<TARGET> --rules <PATH>` | Scans a file, directory, stdin stream (`-`), or process memory (`--pid`). |
+| `check` | `<RULES_PATH>` | Validates rule syntax, AST construction, and pattern compilation. |
+| `compile` | `<RULES_PATH> -o <OUTPUT>` | Compiles rules into a serialized binary format for fast loading. |
+| `test` | `<SPEC_PATH>` | Runs automated rule verification against test fixture specifications. |
+| `bench` | `--rules <PATH>` | Measures pattern-matching throughput and scan duration across samples. |
 
-### 2. Pre-compiled Rule Cache (`raya compile`)
+### Scan Options
 
-Pre-compile rule collections into a high-performance binary cache (`.rc`) for sub-millisecond rule loading:
+```text
+Arguments:
+  <TARGET>                   File, directory, or '-' for standard input
 
-```bash
-# Compile rules into a binary cache
-raya compile rules/ -o rules.rc
-
-# Scan using the pre-compiled binary rule cache
-raya scan samples/malware.exe -R rules.rc
+Options:
+  -r, --rules <PATH>         Path to a .raya rule file or directory containing rules
+  -f, --format <FORMAT>      Output format: text, json, sarif, stix [default: text]
+  -o, --output <FILE>        Write output to file instead of stdout
+  -c, --compiled <FILE>      Load pre-compiled binary rules
+      --password <PWD>       Password for encrypted archives (default list tried automatically)
+      --pid <PID>            Scan process virtual memory (Linux/macOS)
+      --max-size <BYTES>     Skip files exceeding size limit
+      --workers <NUM>        Thread pool size for directory scans [default: logical cores]
+  -v, --verbose              Enable detailed debug logging
+  -h, --help                 Print help information
 ```
 
-### 2. Rule Validation (`raya check`)
+### Exit Codes
 
-Verify syntax, regex integrity, and structural validity of rule collections:
-
-```bash
-# Validate all rules in a directory
-raya check rules/
-
-# Verbose rule validation
-raya check rules/ --verbose
-```
-
-### 3. Automated Rule Testing (`raya test`)
-
-Execute regression test suites to guarantee positive detections and prevent false positives:
-
-```bash
-raya test tests/fixtures/test_spec.json
-```
-
-### 4. Performance Benchmarking (`raya bench`)
-
-Measure throughput, scan latency, and rule compilation time:
-
-```bash
-raya bench tests/fixtures/ --rules rules/ --iterations 5
-```
+* `0`: Scan completed successfully; no rules matched (clean).
+* `1`: Scan completed successfully; one or more rules matched (detection).
+* `2`: Execution error encountered (e.g. invalid arguments, unreadable path, malformed rule).
 
 ---
 
-## Rule Language Specification
+## Rule Specification
 
-Raya detection rules are organized into `meta`, `strings`, and `condition` blocks:
+Raya rules use a declarative domain-specific language (DSL) compatible with standard signature conventions.
+
+### Structure
 
 ```raya
-rule process_injection : windows injection malware {
+rule <identifier> : <tag1> <tag2> {
     meta:
-        author = "Raya Research Team"
-        description = "Detects characteristic Windows process injection API combinations"
-        severity = "high"
-        technique = "T1055"
-        reference = "https://attack.mitre.org/techniques/T1055/"
+        author = "<author>"
+        description = "<description>"
+        severity = "<info|low|medium|high|critical>"
+        technique = "<MITRE_ATTACK_ID>"
 
     strings:
-        $vae = "VirtualAllocEx" ascii wide
-        $wpm = "WriteProcessMemory" ascii wide
-        $crt = "CreateRemoteThread" ascii wide
-        $stub = { 48 89 5C 24 ?? 48 89 ?? ?? 48 83 EC 20 }
-        $b64 = /[A-Za-z0-9+\/]{80,}={0,2}/
+        $<id> = "<string>" [modifiers]
+        $<id> = { <hex_tokens> }
+        $<id> = /<regex>/ [modifiers]
 
     condition:
-        ($vae and $wpm and $crt)
-        or $stub
-        or (2 of ($vae, $wpm, $crt) and pe.import("kernel32.dll", "VirtualAllocEx"))
+        <boolean_expression>
 }
 ```
 
-### 1. Metadata Block (`meta:`)
+### String Modifiers
 
-* `author`: Author or research group.
-* `description`: Detailed explanation of the threat or technique.
-* `severity`: `info`, `low`, `medium`, `high`, `critical`.
-* `technique`: MITRE ATT&CK technique mapping (e.g. `T1055`).
-* Arbitrary key-value pairs (strings, integers, floats, booleans).
+* `ascii`: Matches 8-bit ASCII characters (default).
+* `wide`: Matches 16-bit little-endian UTF-16 characters.
+* `nocase`: Case-insensitive comparison.
+* `fullword`: Requires delimiters (non-alphanumeric boundaries) around the match.
+* `xor(min, max)`: Matches single-byte XOR transformations across the specified key range.
 
-### 2. Strings Block (`strings:`)
+### Hex Patterns
 
-* **Literal Strings:**
+Hex patterns support byte literals, wildcards, jumps, and alternations:
 
-  ```text
-  $str1 = "powershell" ascii
-  $str2 = "VirtualAllocEx" wide        // Matches UTF-16LE encoding
-  $str3 = "cmd.exe" ascii wide nocase  // Case-insensitive ASCII and UTF-16LE
-  ```
+```raya
+$hex_stub = { 55 89 e5 [2-4] 83 ec ?? ( c3 | c9 c3 ) }
+```
 
-* **Hexadecimal Byte Patterns:**
-  Supports full byte wildcards (`??`) and high/low nibble wildcards (`4?`, `?8`):
+### Binary Introspection Namespaces
 
-  ```text
-  $hex1 = { 48 8B ?? ?? 48 85 C0 }
-  $hex2 = { 4? 8B ?4 24 }
-  ```
+#### PE Introspection (`pe.`)
 
-* **Regular Expressions:**
+* `pe.is_pe`: Evaluates to `true` if the target is a valid PE32 or PE32+ binary.
+* `pe.imphash`: Returns the MD5 import hash string.
+* `pe.exphash`: Returns the MD5 export hash string.
+* `pe.has_rwx`: Evaluates to `true` if any PE section possesses Read, Write, and Execute flags.
+* `pe.has_tls`: Evaluates to `true` if the binary registers TLS callbacks.
+* `pe.import(dll, function)`: Checks for the existence of an imported API.
+* `pe.export(function)`: Checks for an exported symbol.
+* `pe.section(name).entropy`: Computes Shannon entropy for the specified section.
+* `pe.in_basic_block(mnemonic_a, mnemonic_b)`: Verifies instructions appear within the same basic block.
+* `pe.api_call_arg(api_name, value)`: Tracks static arguments supplied to the specified API.
 
-  ```text
-  $regex1 = /https?:\/\/[a-z0-9.\-]+\/beacon/i
-  ```
+#### ELF Introspection (`elf.`)
 
-### 3. Condition Block (`condition:`)
+* `elf.is_elf`: Evaluates to `true` if the target is an ELF32 or ELF64 binary.
+* `elf.has_nx`: Evaluates to `true` if the stack segment is marked non-executable.
+* `elf.import(symbol)`: Checks for a referenced dynamic symbol.
+* `elf.section(name).entropy`: Computes Shannon entropy for the specified section.
 
-* **Boolean Logic:** `and`, `or`, `not`, parentheses `( ... )`.
-* **String References:**
-  * `$str`: True if pattern `$str` matched at least once.
-  * `#str`: Match count of `$str` (e.g., `#str >= 3`).
-  * `@str`: File byte offset of the first match of `$str` (e.g., `@str < 1024`).
-* **Quantifiers:**
-  * `2 of ($a, $b, $c)`
-  * `2 of ($api_*)`
-  * `all of them`
-  * `any of them`
-  * `none of them`
-* **PE Executable Awareness (`pe.*`):**
-  * `pe.is_pe`: Boolean indicating if target is a valid Portable Executable.
-  * `pe.is_pe32_plus`: True for 64-bit PE32+ executables.
-  * `pe.is_dll`: True if file is a dynamic link library.
-  * `pe.is_signed`: True if file contains an Authenticode PKCS#7 digital signature.
-  * `pe.has_rich_header`: True if Microsoft Rich Header compiler fingerprint is present.
-  * `pe.has_rich_comp_id(30729)`: Matches compiler build ID in decrypted Rich Header.
-  * `pe.number_of_sections`: Total number of sections.
-  * `pe.has_rwx`: True if any section has Read-Write-Execute permissions.
-  * `pe.import("kernel32.dll", "VirtualAllocEx")`: True if function is imported.
-  * `pe.export("DllRegisterServer")`: True if function is exported.
-  * `pe.section(".text").entropy > 7.2`: Queries section Shannon entropy.
-  * `pe.section(".text").executable`: Section permission flag check.
-  * `pe.section(".data").writable`: Section permission flag check.
-* **ELF Executable Awareness (`elf.*`):**
-  * `elf.is_elf`: Boolean indicating if target is a valid ELF executable.
-  * `elf.is_64`: True for 64-bit ELF.
-  * `elf.is_executable`: True for ET_EXEC binaries.
-  * `elf.section(".text").executable`: Section permission flag check.
-* **Mach-O Executable Awareness (`macho.*`):**
-  * `macho.is_macho`: Boolean indicating if target is a valid Mach-O binary.
-  * `macho.is_64`: True for 64-bit Mach-O (`0xFEEDFACF`).
-  * `macho.is_fat`: True for Universal / FAT multi-architecture binaries (`0xCAFEBABE`).
-  * `macho.is_signed`: True if file contains an embedded code signature (`LC_CODE_SIGNATURE`).
-  * `macho.has_dylib("libSystem.B.dylib")`: Matches imported dynamic libraries (`LC_LOAD_DYLIB`).
-  * `macho.has_segment("__TEXT")`: True if segment is defined.
-  * `macho.has_section("__TEXT", "__text")`: True if specific section is present.
-* **Entropy & Pattern Analysis:**
-  * `entropy`: Global Shannon entropy across whole target ($0.0 - 8.0$).
-  * `entropy.max_window_exceeds(512, 7.5)`: Sliding-window entropy exceeding threshold in any 512-byte cave.
-  * `uint16(0) == 0x5a4d`: YARA-compatible byte inspection at file offset.
-  * `$mz at 0`: Offset assertion for pattern match.
-* **Global Target Attributes:**
-  * `filesize`: File size in bytes (e.g., `filesize > 10MB`).
-  * `entropy`: Whole-file Shannon entropy (0.0 to 8.0).
+#### Mach-O Introspection (`macho.`)
+
+* `macho.is_macho`: Evaluates to `true` if the target is a Mach-O or Universal FAT binary.
+* `macho.is_fat`: Evaluates to `true` if the binary contains multi-architecture slices.
+* `macho.section(segment, section).entropy`: Computes entropy for the named segment/section.
 
 ---
 
-## Detection Explainability
+## Examples
 
-Raya displays an evidence breakdown with every match:
+### 1. In-Memory Archive Triage
+
+Raya identifies encrypted archive drops, attempts extraction in memory using built-in passwords (`infected`, `malware`, `password`, `clean`, `1234`) or user-supplied credentials, and scans inner payloads without disk I/O:
+
+```bash
+raya scan samples/malware/drop.zip --rules rules/ --format text
+```
+
+Output:
 
 ```text
-Target: samples/injection_sample.exe
-Size:   2560 bytes
-Type:   PE32+
-SHA256: 308cef28bb96280421364a9b90030cd0482779a5a575bafcc03b09b3412df06a
-Entropy: 1.43 / 8.0
+Target:       samples/malware/drop.zip -> payload.exe
+Size:         3514368 bytes
+Type:         PE32
+SHA256:       ed01ebfbc9eb5bbea545af4d01bf5f1071661840480439c6e5babe8e080e41aa
+IMPHASH:      68f013d7437aa653a8a98a05807afeb1
+Entropy:      8.00 / 8.0
+Threat Level: [MALICIOUS] (Score: 85/100)
+ATT&CK Chain: Impact (Ransomware)
 
 MATCHES (1 rule(s) triggered):
 
-[HIGH] process_injection (windows, injection, malware)
-  Description: Detects characteristic Windows process injection API combinations
-  ATT&CK:      T1055
+[CRITICAL] ransomware_wannacry (windows, ransomware)
+  Description: Detects WannaCry ransomware artifacts and execution commands
+  ATT&CK:      T1486
   Evidence:
-    ✓ Pattern $vae (1 hit(s) at [0x400])
-    ✓ Pattern $wpm (1 hit(s) at [0x40f])
-    ✓ Pattern $crt (1 hit(s) at [0x422])
-  Verdict Reason: Condition satisfied with 3 evidence indicator(s)
+    ✓ Pattern $tasksche (1 hit(s) at [0xf4d8])
+    ✓ Pattern $icacls (1 hit(s) at [0xf4fc])
+  Verdict Reason: Condition satisfied with 2 evidence indicator(s)
 ```
 
-In JSON output mode (`--json`), evidence is structured for ingestion:
+### 2. Static API Call Argument Tracking
 
-```json
-{
-  "target": "samples/injection_sample.exe",
-  "file_size": 2560,
-  "file_type": "PE32+",
-  "hashes": {
-    "sha256": "308cef28bb96280421364a9b90030cd0482779a5a575bafcc03b09b3412df06a",
-    "sha1": "75462994eccd43f583c178b59a41bafd54f0c063",
-    "md5": "8f437d82a5ccdae226c60ff05aff960c"
-  },
-  "entropy": 1.4257,
-  "matches": [
-    {
-      "rule": "process_injection",
-      "severity": "high",
-      "tags": ["windows", "injection", "malware"],
-      "mitre_technique": "T1055",
-      "matched_indicators": ["$vae", "$wpm", "$crt"],
-      "evidence": [
-        { "StringMatch": { "id": "$vae", "count": 1, "offsets": [1024] } },
-        { "StringMatch": { "id": "$wpm", "count": 1, "offsets": [1039] } },
-        { "StringMatch": { "id": "$crt", "count": 1, "offsets": [1058] } }
-      ],
-      "reason": "Condition satisfied with 3 evidence indicator(s)"
-    }
-  ],
-  "scan_duration_ms": 4.12
+Rule:
+
+```raya
+rule detect_rwx_allocation {
+    meta:
+        description = "Detects memory allocation with PAGE_EXECUTE_READWRITE"
+        severity = "critical"
+        technique = "T1055.002"
+
+    condition:
+        pe.is_pe and (
+            pe.api_call_arg("VirtualAlloc", 0x40)
+            or pe.api_call_arg("VirtualProtect", 0x40)
+        )
 }
 ```
 
----
-
-## Safe Malware Research & Corpus Handling
-
-In accordance with defensive engineering best practices:
-
-1. **No Live Malware in Git:** Live, runnable malware samples must **never** be committed to the repository. The project maintains a cryptographic sample manifest at [`samples/manifest.json`](file:///Users/tryhard/Raya/samples/manifest.json) recording SHA-256 hashes, malware families, and expected rule matches.
-2. **Static Scanning Only:** Raya does not execute files. Parsing is strictly passive.
-3. **Dedicated Isolation:** External real-world malware corpora should be evaluated inside an isolated, non-networked analysis VM.
-
----
-
-## Verification & Testing
-
-Execute the test suite across all targets:
+Scan execution:
 
 ```bash
-# Run unit and integration tests
-cargo test --all-targets
-
-# Run the automated rule verification harness
-cargo run -- test tests/fixtures/test_spec.json
-
-# Validate all bundled rules
-cargo run -- check rules/ --verbose
+raya scan sample.exe --rules rules/
 ```
+
+Output:
+
+```text
+MATCHES (1 rule(s) triggered):
+
+[CRITICAL] detect_rwx_allocation (windows, injection)
+  Description: Detects memory allocation with PAGE_EXECUTE_READWRITE
+  ATT&CK:      T1055.002
+  Evidence:
+    ✓ API Call Argument: VirtualAlloc!flProtect = 0x40 (PAGE_EXECUTE_READWRITE) at VA 0x140003785
+  Verdict Reason: Condition satisfied with 1 evidence indicator(s)
+```
+
+### 3. SARIF Export for CI/CD Pipelines
+
+Export static findings directly into SARIF format for ingestion into GitHub Advanced Security:
+
+```bash
+raya scan target_directory/ --rules rules/ --format sarif -o results.sarif
+```
+
+---
+
+## Performance & Architecture
+
+* **Memory-Mapped I/O**: Files $\ge 16\text{ KB}$ are scanned using `memmap2`, avoiding kernel-to-user buffer copying.
+* **Work-Stealing Concurrency**: Multi-file directories are partitioned across CPU cores using `rayon`.
+* **Single-Pass String Matching**: Literal string patterns from all active rules are compiled into a unified Aho-Corasick automaton, evaluating in $O(N)$ time with respect to input size.
+* **Zero Allocations in Inner Loops**: Parsers operate directly on byte slices without heap reallocation.
+
+---
+
+## Documentation
+
+Full documentation is available in the [`docs/`](docs/index.md) directory:
+
+* [Quick Start Guide](docs/getting_started.md)
+* [CLI Reference](docs/cli_reference.md)
+* [Rule Writing Guide](docs/rule_writing_guide.md)
+* [Advanced Capabilities & Scoping](docs/advanced_capabilities.md)
+* [Threat Scoring & MITRE ATT&CK](docs/threat_scoring.md)
+* [Enterprise Integrations (SARIF & STIX)](docs/enterprise_integrations.md)
+* [Engine Architecture](docs/architecture.md)
 
 ---
 
 ## License
 
-Dual-licensed under either the MIT License or the Apache License (Version 2.0).
+Licensed under the Apache License, Version 2.0 (the "License").
+You may obtain a copy of the License at [http://www.apache.org/licenses/LICENSE-2.0](http://www.apache.org/licenses/LICENSE-2.0).
