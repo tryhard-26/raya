@@ -1,3 +1,28 @@
+//! # Shannon Entropy & Randomness Analysis
+//!
+//! Provides utilities to calculate Shannon entropy over entire files, specific PE sections,
+//! or localized sliding windows to detect encryption, compression, and packing.
+//!
+//! ## Interpretation of Values
+//!
+//! - **0.0 - 1.0**: Null padding, zero-filled buffers, or uniform repeating patterns.
+//! - **1.0 - 5.0**: Plaintext code, ASCII text, configuration data.
+//! - **5.0 - 7.0**: Compiled machine code, standard PE/ELF sections (`.text`, `.rdata`).
+//! - **7.0 - 7.5**: Mildly compressed or obfuscated data.
+//! - **7.5 - 8.0**: Heavily encrypted, compressed payloads, or packed sections (e.g. UPX, Themida).
+//!
+//! ## Example
+//!
+//! ```rust
+//! use raya::entropy::shannon_entropy;
+//!
+//! let zeroes = [0u8; 100];
+//! assert_eq!(shannon_entropy(&zeroes), 0.0);
+//!
+//! let text = b"The quick brown fox jumps over the lazy dog";
+//! assert!(shannon_entropy(text) < 5.0);
+//! ```
+
 /// Calculates the Shannon entropy of a byte slice.
 /// Returns a value between 0.0 (completely uniform/zero information) and 8.0 (maximum randomness/compressed/encrypted).
 pub fn shannon_entropy(data: &[u8]) -> f64 {

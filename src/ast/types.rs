@@ -1,15 +1,21 @@
 use std::collections::HashMap;
 use std::fmt;
 
+/// Severity classification for detection rules and scan alerts.
 #[derive(
     Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
 )]
 #[serde(rename_all = "lowercase")]
 pub enum Severity {
+    /// Informational indicators or benign environmental markers.
     Info,
+    /// Low-priority suspicious indicators.
     Low,
+    /// Medium-priority suspicious indicators (default severity).
     Medium,
+    /// High-confidence malicious patterns or known threat behaviors.
     High,
+    /// Critical confirmed threats (e.g. ransomware, active exploits, backdoors).
     Critical,
 }
 
@@ -173,17 +179,25 @@ impl fmt::Display for SourceLocation {
     }
 }
 
+/// Parsed Abstract Syntax Tree (AST) representation of a Raya detection rule.
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct Rule {
+    /// Unique identifier / rule name.
     pub name: String,
+    /// Tags attached to the rule for taxonomy or filtering.
     pub tags: Vec<String>,
+    /// Key-value metadata table (`author`, `description`, `severity`, `technique`).
     pub meta: HashMap<String, MetaValue>,
+    /// Pattern definitions (`strings:` section).
     pub strings: Vec<StringDefinition>,
+    /// Boolean logic expression tree (`condition:` section).
     pub condition: Expr,
+    /// Originating line and column in the source file.
     pub location: SourceLocation,
 }
 
 impl Rule {
+    /// Returns the rule severity extracted from `meta.severity`, defaulting to [`Severity::Medium`].
     pub fn severity(&self) -> Severity {
         if let Some(MetaValue::String(s)) = self.meta.get("severity") {
             s.parse::<Severity>().unwrap_or(Severity::Medium)

@@ -1,3 +1,29 @@
+//! # Rule Parsing & Lexical Analysis
+//!
+//! Provides the parser and tokenizer that transform Raya and YARA-compatible rule files
+//! into structured Abstract Syntax Trees ([`Rule`]).
+//!
+//! ## Example
+//!
+//! ```rust
+//! use raya::parser::parse_rules_from_str;
+//!
+//! let rules = parse_rules_from_str(r#"
+//!     rule detect_ransom_note {
+//!         meta:
+//!             severity = "critical"
+//!             mitre = "T1486"
+//!         strings:
+//!             $note = "Your files have been encrypted" ascii
+//!         condition:
+//!             $note
+//!     }
+//! "#).expect("Rule should parse cleanly");
+//!
+//! assert_eq!(rules.len(), 1);
+//! assert_eq!(rules[0].name, "detect_ransom_note");
+//! ```
+
 pub mod lexer;
 #[allow(clippy::module_inception)]
 pub mod parser;
@@ -9,11 +35,21 @@ use crate::ast::Rule;
 use std::fs;
 use std::path::Path;
 
+/// Parses a string containing one or more Raya or YARA-compatible rules.
+///
+/// # Errors
+///
+/// Returns [`ParseError`] if lexical scanning fails or rule syntax is malformed.
 pub fn parse_rules_from_str(source: &str) -> Result<Vec<Rule>, ParseError> {
     let mut parser = Parser::from_source(source)?;
     parser.parse_rules()
 }
 
+/// Reads a rule file from the filesystem and parses its rules.
+///
+/// # Errors
+///
+/// Returns [`ParseError`] if the file cannot be read or if syntax errors are present.
 pub fn parse_rules_from_file<P: AsRef<Path>>(path: P) -> Result<Vec<Rule>, ParseError> {
     let content = fs::read_to_string(path.as_ref()).map_err(|e| ParseError {
         location: Default::default(),

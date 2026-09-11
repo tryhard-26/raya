@@ -1,3 +1,13 @@
+//! # Reporting, Evidence Formatting & Threat Scoring
+//!
+//! This module provides structured reporting models, terminal formatting, and enterprise
+//! integrations for scan verdicts.
+//!
+//! - [`ScanResult`]: Top-level scan report containing hashes, entropy, file format, and rule matches.
+//! - [`RuleMatch`]: Information on an individual matched rule, including MITRE ATT&CK techniques and concrete evidence.
+//! - [`to_sarif`]: Serializer for **OASIS SARIF v2.1.0**, directly ingestible by GitHub Code Scanning and security dashboards.
+//! - [`to_stix`]: Serializer for **OASIS STIX 2.1**, converting detections into structured threat intelligence bundles.
+
 use crate::ast::Severity;
 use crate::binary::BinaryAnalysis;
 use crate::engine::context::MatchedEvidence;
@@ -5,35 +15,63 @@ use crate::hash::FileHashes;
 use colored::Colorize;
 use serde::{Deserialize, Serialize};
 
+/// Detailed report of a single detection rule match.
+///
+/// Contains rule metadata, threat severity, MITRE ATT&CK mapping, and an array
+/// of concrete [`MatchedEvidence`] entries documenting exact technical findings.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RuleMatch {
+    /// Name of the matched rule.
     pub rule: String,
+    /// Assessed severity level.
     pub severity: Severity,
+    /// Tags assigned to the rule (e.g. `["windows", "malware", "injection"]`).
     pub tags: Vec<String>,
+    /// Optional human-readable rule description.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
+    /// Author or organization that created the rule.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub author: Option<String>,
+    /// Associated MITRE ATT&CK technique ID (e.g. `T1055.002`).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub mitre_technique: Option<String>,
+    /// Compact list of satisfied indicator names (e.g. `["$inject", "imphash:abc"]`).
     pub matched_indicators: Vec<String>,
+    /// Full technical evidence details (offsets, bytes, disassembly, API arguments).
     pub evidence: Vec<MatchedEvidence>,
+    /// Explanation of why the rule condition was satisfied.
     pub reason: String,
 }
 
+/// The complete forensic verdict produced by scanning a target file or buffer.
+///
+/// Contains whole-file cryptographic and fuzzy hashes, entropy calculations,
+/// executable format introspection, a normalized threat score (0–100), and all
+/// triggered [`RuleMatch`]es.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ScanResult {
+    /// Identifier or filepath of the scanned target.
     pub target: String,
+    /// Size of the target in bytes.
     pub file_size: usize,
+    /// Detected format (e.g. `"PE32+"`, `"ELF64"`, `"Mach-O"`, `"RAW"`).
     pub file_type: String,
+    /// Cryptographic (MD5, SHA1, SHA256) and fuzzy (SSDEEP, imphash, exphash) hashes.
     pub hashes: FileHashes,
+    /// Whole-file Shannon entropy (0.0 to 8.0).
     pub entropy: f64,
+    /// List of all triggered rule detections.
     pub matches: Vec<RuleMatch>,
+    /// Duration of the scan in milliseconds.
     pub scan_duration_ms: f64,
+    /// Computed composite threat score from 0 (benign) to 100 (critical threat).
     #[serde(default)]
     pub threat_score: u8,
+    /// Qualitative classification (`"CLEAN"`, `"SUSPICIOUS"`, `"MALICIOUS"`, `"CRITICAL"`).
     #[serde(default)]
     pub threat_level: String,
+    /// Discovered MITRE ATT&CK tactics (e.g. `["Execution", "Defense Evasion"]`).
     #[serde(default)]
     pub attack_tactics: Vec<String>,
 }
@@ -367,6 +405,18 @@ impl ScanResult {
     }
 }
 
+/// Converts a slice of [`ScanResult`] items into an **OASIS SARIF v2.1.0** JSON report.
+///
+/// SARIF (Static Analysis Results Interchange Format) is the industry standard for
+/// uploading static analysis findings to **GitHub Advanced Security / Code Scanning**,
+/// GitLab SAST, and enterprise IDEs.
+///
+/// Each rule is converted into a SARIF `rule` object with MITRE ATT&CK taxonomy tags,
+/// and each detection produces a SARIF `result` with physical file locations and byte offsets.
+///
+/// # Errors
+///
+/// Returns [`serde_json::Error`] if serialization fails.
 pub fn to_sarif(results: &[ScanResult]) -> Result<String, serde_json::Error> {
     use serde_json::json;
 
@@ -521,6 +571,20 @@ pub fn to_sarif(results: &[ScanResult]) -> Result<String, serde_json::Error> {
     serde_json::to_string_pretty(&output)
 }
 
+/// Converts a slice of [`ScanResult`] items into an **OASIS STIX 2.1** JSON bundle.
+///
+/// STIX (Structured Threat Information Expression) 2.1 is the global standard for
+/// cyber threat intelligence (CTI) sharing and SOAR platform ingestion (e.g. OpenCTI,
+/// MISP, Splunk ES, Sentinel).
+///
+/// Produces a STIX `bundle` containing:
+/// - A `file` Cyber Observable Object (SCO) capturing hashes (SHA-256, SHA-1, MD5, SSDEEP, imphash).
+/// - An `indicator` Domain Object (SDO) for each detected rule with MITRE ATT&CK technique references.
+/// - A `relationship` SDO (`"based-on"`) connecting the indicator to the target file observable.
+///
+/// # Errors
+///
+/// Returns [`serde_json::Error`] if serialization fails.
 pub fn to_stix(results: &[ScanResult]) -> Result<String, serde_json::Error> {
     use serde_json::json;
 

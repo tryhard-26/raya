@@ -1,3 +1,13 @@
+//! # Scanning Engine & Evaluation Pipeline
+//!
+//! This module contains [`Engine`], the central execution engine responsible for:
+//! - Compiling abstract rules into high-performance search automata.
+//! - Running single-pass global multi-string searches using [Aho-Corasick](aho_corasick).
+//! - Executing isolated regex and hex wildcard pattern scans.
+//! - Performing executable format introspection ([PE](crate::binary::pe), [ELF](crate::binary::elf), [Mach-O](crate::binary::macho)).
+//! - Evaluating boolean condition trees and recording concrete [`MatchedEvidence`].
+//! - Calculating threat scores (0–100) and mapping matches to MITRE ATT&CK tactics.
+
 pub mod context;
 pub mod evaluator;
 pub mod matcher;
@@ -18,14 +28,45 @@ use std::time::Instant;
 use aho_corasick::AhoCorasick;
 use std::collections::HashMap;
 
+/// A single compiled rule containing its AST definition and pre-compiled search patterns.
 pub struct CompiledRule {
+    /// The parsed Abstract Syntax Tree (AST) definition of the rule.
     pub rule: Rule,
+    /// Pre-compiled regex and hex pattern matchers for this rule.
     pub patterns: CompiledRulePatterns,
 }
 
+/// The core scanning engine that executes compiled rules against byte streams and files.
+///
+/// An [`Engine`] is created by compiling one or more parsed [`Rule`] definitions via
+/// [`Engine::compile_rules`]. The engine constructs a global, single-pass Aho-Corasick
+/// automaton from all simple ASCII string patterns across all rules, ensuring O(N) linear
+/// time complexity regardless of rule count.
+///
+/// # Example
+///
+/// ```rust
+/// use raya::prelude::*;
+///
+/// let rules = parse_rules_from_str(r#"
+///     rule sample_detection {
+///         strings:
+///             $a = "malicious_payload"
+///         condition:
+///             $a
+///     }
+/// "#).unwrap();
+///
+/// let engine = Engine::compile_rules(rules).unwrap();
+/// let result = engine.scan_bytes(b"Contains malicious_payload here", "sample.bin");
+/// assert_eq!(result.matches.len(), 1);
+/// ```
 pub struct Engine {
+    /// All compiled rules loaded into the engine.
     pub rules: Vec<CompiledRule>,
+    /// Global Aho-Corasick automaton across all simple literal patterns.
     pub global_ac: Option<AhoCorasick>,
+    /// Mapping of global pattern IDs back to (rule_index, string_identifier).
     pub global_pattern_targets: Vec<(usize, String)>,
 }
 
@@ -36,6 +77,7 @@ impl Default for Engine {
 }
 
 impl Engine {
+    /// Creates an empty scanning engine with no rules loaded.
     pub fn new() -> Self {
         Self {
             rules: Vec::new(),
@@ -44,6 +86,14 @@ impl Engine {
         }
     }
 
+    /// Compiles a vector of parsed [`Rule`]s into an optimized scanning engine.
+    ///
+    /// This method partitions literal strings suitable for global Aho-Corasick acceleration,
+    /// compiles regular expressions and hex byte patterns, and optimizes rule conditions.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`MatchError`] if any regular expression or hex pattern fails to compile.
     pub fn compile_rules(rules: Vec<Rule>) -> Result<Self, MatchError> {
         let mut global_patterns: Vec<Vec<u8>> = Vec::new();
         let mut global_pattern_targets: Vec<(usize, String)> = Vec::new();
@@ -93,6 +143,15 @@ impl Engine {
         })
     }
 
+    /// Scans an in-memory byte slice against all compiled rules.
+    ///
+    /// The scan performs the following automated analysis pipeline:
+    /// 1. Computes cryptographic hashes (MD5, SHA1, SHA256).
+    /// 2. Computes whole-file Shannon entropy (0.0 to 8.0).
+    /// 3. Introspects executable headers ([PE](crate::binary::pe), [ELF](crate::binary::elf), [Mach-O](crate::binary::macho)).
+    /// 4. Executes global Aho-Corasick matching across all rules in a single pass.
+    /// 5. Evaluates rule conditions and populates [`MatchedEvidence`].
+    /// 6. Computes comprehensive threat score (0–100) and MITRE ATT&CK mapping.
     pub fn scan_bytes(&self, data: &[u8], target_name: &str) -> ScanResult {
         let start = Instant::now();
         let mut hashes = compute_hashes(data);
@@ -257,6 +316,15 @@ impl Engine {
         }
     }
 
+    /// Scans a file on disk against all compiled rules.
+    ///
+    /// For performance and memory efficiency, files $\ge 16\text{ KB}$ are mapped
+    /// into memory using [`memmap2::Mmap`], eliminating buffer duplication and kernel-to-user
+    /// copying overhead. Files $< 16\text{ KB}$ are read directly into a stack/heap buffer.
+    ///
+    /// # Errors
+    ///
+    /// Returns an [`std::io::Error`] if the file cannot be found or read.
     pub fn scan_file<P: AsRef<Path>>(&self, path: P) -> Result<ScanResult, std::io::Error> {
         let p = path.as_ref();
         let target_name = p.display().to_string();
@@ -278,6 +346,14 @@ impl Engine {
         }
     }
 
+    /// Serializes and saves the engine's compiled rule definitions to a binary file.
+    ///
+    /// Pre-compiling rules with this method allows near-instantaneous startup in CLI tools,
+    /// daemon services, and serverless scanning functions by bypassing lexing and parsing.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if serialization or filesystem writing fails.
     pub fn save_compiled_rules<P: AsRef<Path>>(
         &self,
         path: P,
@@ -288,6 +364,11 @@ impl Engine {
         Ok(())
     }
 
+    /// Deserializes and loads pre-compiled rules from a binary file.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if reading the file or deserializing fails.
     pub fn load_compiled_rules<P: AsRef<Path>>(
         path: P,
     ) -> Result<Self, Box<dyn std::error::Error>> {

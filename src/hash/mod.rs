@@ -1,15 +1,39 @@
+//! # Cryptographic & Fuzzy Hashing
+//!
+//! Provides single-pass cryptographic hashing (MD5, SHA1, SHA256) and pure Rust
+//! fuzzy hashing (SSDEEP) for sample correlation and malware similarity scoring.
+//!
+//! ## Example
+//!
+//! ```rust
+//! use raya::hash::compute_hashes;
+//!
+//! let sample = b"MZ\x90\x00malicious payload";
+//! let hashes = compute_hashes(sample);
+//!
+//! assert!(!hashes.sha256.is_empty());
+//! assert!(!hashes.md5.is_empty());
+//! ```
+
 use md5::Md5;
 use sha1::Sha1;
 use sha2::{Digest, Sha256};
 use std::fmt;
 
+/// Cryptographic and contextual hashes computed for a scanned binary.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct FileHashes {
+    /// Hex-encoded SHA-256 digest.
     pub sha256: String,
+    /// Hex-encoded SHA-1 digest.
     pub sha1: String,
+    /// Hex-encoded MD5 digest.
     pub md5: String,
+    /// Context Triggered Piecewise Hashing (SSDEEP fuzzy hash).
     pub ssdeep: Option<String>,
+    /// PE Import Hash (imphash).
     pub imphash: Option<String>,
+    /// PE Export Hash (exphash).
     pub exphash: Option<String>,
 }
 
