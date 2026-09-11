@@ -60,6 +60,10 @@ pub enum Commands {
         /// Number of worker threads for parallel scanning
         #[arg(long)]
         threads: Option<usize>,
+
+        /// Optional decryption password for password-protected archives (defaults: infected, malware, etc.)
+        #[arg(long, value_name = "PASSWORD")]
+        password: Option<String>,
     },
 
     /// Pre-compile rules into a high-performance binary cache (.rc)
@@ -124,6 +128,7 @@ pub fn run_cli() -> i32 {
             quiet,
             tag,
             threads,
+            password,
         } => scan::run_scan(scan::ScanArgs {
             target,
             rules,
@@ -134,6 +139,7 @@ pub fn run_cli() -> i32 {
             quiet,
             tag,
             threads,
+            password,
         }),
         Commands::Compile { rules, output } => {
             compile::run_compile(compile::CompileArgs { rules, output })

@@ -9,21 +9,26 @@ pub struct FileHashes {
     pub sha1: String,
     pub md5: String,
     pub ssdeep: Option<String>,
+    pub imphash: Option<String>,
+    pub exphash: Option<String>,
 }
 
 impl fmt::Display for FileHashes {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(
-            f,
-            "SHA256: {}\nSHA1:   {}\nMD5:    {}{}",
-            self.sha256,
-            self.sha1,
-            self.md5,
-            self.ssdeep
-                .as_ref()
-                .map(|s| format!("\nSSDEEP: {}", s))
-                .unwrap_or_default()
-        )
+        let mut s = format!(
+            "SHA256:  {}\nSHA1:    {}\nMD5:     {}",
+            self.sha256, self.sha1, self.md5
+        );
+        if let Some(ref imp) = self.imphash {
+            s.push_str(&format!("\nIMPHASH: {}", imp));
+        }
+        if let Some(ref exp) = self.exphash {
+            s.push_str(&format!("\nEXPHASH: {}", exp));
+        }
+        if let Some(ref ssd) = self.ssdeep {
+            s.push_str(&format!("\nSSDEEP:  {}", ssd));
+        }
+        write!(f, "{}", s)
     }
 }
 
@@ -57,7 +62,15 @@ pub fn compute_hashes(data: &[u8]) -> FileHashes {
         sha1: sha1_hash,
         md5: md5_hash,
         ssdeep: ssdeep_hash,
+        imphash: None,
+        exphash: None,
     }
+}
+
+pub fn compute_md5(data: &[u8]) -> String {
+    let mut hasher = Md5::new();
+    hasher.update(data);
+    format!("{:x}", hasher.finalize())
 }
 
 pub fn compute_sha256(data: &[u8]) -> String {

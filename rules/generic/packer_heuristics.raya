@@ -1,0 +1,26 @@
+rule tls_anti_analysis : windows evasion anti_debug {
+    meta:
+        author = "Raya Research Team"
+        description = "Detects TLS callbacks used for pre-entrypoint execution and anti-debugging evasion"
+        severity = "high"
+        technique = "T1055"
+        reference = "https://attack.mitre.org/techniques/T1055/"
+
+    condition:
+        pe.is_pe and (pe.has_tls and pe.number_of_tls_callbacks > 0)
+}
+
+rule suspicious_packer_heuristics : windows packer obfuscation {
+    meta:
+        author = "Raya Research Team"
+        description = "Identifies runtime packing via low import count combined with anomalous section entropy"
+        severity = "high"
+        technique = "T1027.002"
+        reference = "https://attack.mitre.org/techniques/T1027/002/"
+
+    condition:
+        pe.is_pe and (
+            (pe.number_of_imports < 6 and pe.section(".text").entropy > 7.1)
+            or (pe.has_section("UPX0") or pe.has_section("UPX1"))
+        )
+}

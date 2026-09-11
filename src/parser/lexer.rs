@@ -401,6 +401,9 @@ impl Lexer {
         }
 
         if name.len() == 1 {
+            if prefix == '$' {
+                return Ok(constructor("$".to_string()));
+            }
             return Err(LexError {
                 location: self.current_loc(),
                 message: format!("Identifier expected after '{}'", prefix),
@@ -577,6 +580,17 @@ impl Lexer {
     fn lex_hex_pattern(&mut self) -> Result<Token, LexError> {
         let loc = self.current_loc();
         self.advance(); // consume '{'
+        let (tokens, _) = self.lex_hex_tokens_until(&['}'])?;
+        Ok(Token {
+            kind: TokenKind::HexPattern(tokens),
+            location: loc,
+        })
+    }
+
+    fn lex_hex_tokens_until(
+        &mut self,
+        delimiters: &[char],
+    ) -> Result<(Vec<HexToken>, char), LexError> {
         let mut tokens = Vec::new();
 
         loop {
@@ -585,15 +599,88 @@ impl Lexer {
                 Some(c) => c,
                 None => {
                     return Err(LexError {
-                        location: loc,
-                        message: "Unterminated hex byte pattern, missing '}'".to_string(),
-                    })
+                        location: self.current_loc(),
+                        message: format!(
+                            "Unexpected end of input inside hex pattern, expected one of {:?}",
+                            delimiters
+                        ),
+                    });
                 }
             };
 
-            if ch == '}' {
+            if delimiters.contains(&ch) {
                 self.advance();
-                break;
+                return Ok((tokens, ch));
+            }
+
+            if ch == '[' {
+                self.advance(); // consume '['
+                self.skip_whitespace_and_comments()?;
+                let mut num_str1 = String::new();
+                while let Some(d) = self.peek() {
+                    if d.is_ascii_digit() {
+                        num_str1.push(self.advance().unwrap());
+                    } else {
+                        break;
+                    }
+                }
+                self.skip_whitespace_and_comments()?;
+                let mut is_range = false;
+                let mut num_str2 = String::new();
+                if self.peek() == Some('-') {
+                    is_range = true;
+                    self.advance(); // consume '-'
+                    self.skip_whitespace_and_comments()?;
+                    while let Some(d) = self.peek() {
+                        if d.is_ascii_digit() {
+                            num_str2.push(self.advance().unwrap());
+                        } else {
+                            break;
+                        }
+                    }
+                }
+                self.skip_whitespace_and_comments()?;
+                if self.peek() != Some(']') {
+                    return Err(LexError {
+                        location: self.current_loc(),
+                        message: "Expected ']' closing hex jump range".to_string(),
+                    });
+                }
+                self.advance(); // consume ']'
+
+                let (min, max) = if is_range {
+                    let min_val = if num_str1.is_empty() {
+                        0
+                    } else {
+                        num_str1.parse::<usize>().unwrap_or(0)
+                    };
+                    let max_val = if num_str2.is_empty() {
+                        None
+                    } else {
+                        Some(num_str2.parse::<usize>().unwrap_or(min_val))
+                    };
+                    (min_val, max_val)
+                } else {
+                    let count = num_str1.parse::<usize>().unwrap_or(0);
+                    (count, Some(count))
+                };
+
+                tokens.push(HexToken::Jump { min, max });
+                continue;
+            }
+
+            if ch == '(' {
+                self.advance(); // consume '('
+                let mut branches: Vec<Vec<HexToken>> = Vec::new();
+                loop {
+                    let (branch, term) = self.lex_hex_tokens_until(&['|', ')'])?;
+                    branches.push(branch);
+                    if term == ')' {
+                        break;
+                    }
+                }
+                tokens.push(HexToken::Alternation(branches));
+                continue;
             }
 
             // Read high nibble char
@@ -605,7 +692,7 @@ impl Lexer {
                     return Err(LexError {
                         location: self.current_loc(),
                         message: "Incomplete hex byte, expected second nibble".to_string(),
-                    })
+                    });
                 }
             };
 
@@ -628,16 +715,11 @@ impl Lexer {
                     return Err(LexError {
                         location: self.current_loc(),
                         message: format!("Invalid hex byte: '{}{}'", high_char, low_char),
-                    })
+                    });
                 }
             };
             tokens.push(token);
         }
-
-        Ok(Token {
-            kind: TokenKind::HexPattern(tokens),
-            location: loc,
-        })
     }
 
     fn lex_regex(&mut self) -> Result<Token, LexError> {

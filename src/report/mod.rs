@@ -1,4 +1,5 @@
 use crate::ast::Severity;
+use crate::binary::BinaryAnalysis;
 use crate::engine::context::MatchedEvidence;
 use crate::hash::FileHashes;
 use colored::Colorize;
@@ -29,11 +30,93 @@ pub struct ScanResult {
     pub entropy: f64,
     pub matches: Vec<RuleMatch>,
     pub scan_duration_ms: f64,
+    #[serde(default)]
+    pub threat_score: u8,
+    #[serde(default)]
+    pub threat_level: String,
+    #[serde(default)]
+    pub attack_tactics: Vec<String>,
 }
 
 impl ScanResult {
     pub fn has_matches(&self) -> bool {
         !self.matches.is_empty()
+    }
+
+    pub fn compute_threat_metrics(
+        matches: &[RuleMatch],
+        entropy: f64,
+        binary: &BinaryAnalysis,
+    ) -> (u8, String, Vec<String>) {
+        if matches.is_empty() {
+            return (0, "CLEAN".to_string(), Vec::new());
+        }
+
+        let mut score: u32 = 0;
+        let mut tactics = std::collections::BTreeSet::new();
+
+        for m in matches {
+            match m.severity {
+                Severity::Critical => score += 70,
+                Severity::High => score += 40,
+                Severity::Medium => score += 20,
+                Severity::Low => score += 10,
+                Severity::Info => score += 3,
+            }
+
+            if let Some(ref tech) = m.mitre_technique {
+                let tactic = match tech.split('.').next().unwrap_or(tech) {
+                    "T1055" => "Privilege Escalation / Injection",
+                    "T1059" => "Execution",
+                    "T1071" => "Command and Control (C2)",
+                    "T1486" => "Impact (Ransomware)",
+                    "T1547" => "Persistence",
+                    "T1027" => "Defense Evasion (Obfuscation)",
+                    "T1036" => "Defense Evasion (Masquerading)",
+                    "T1082" => "Discovery",
+                    "T1003" => "Credential Access",
+                    "T1566" => "Initial Access",
+                    _ => "Malicious Activity",
+                };
+                tactics.insert(tactic.to_string());
+            }
+
+            for ev in &m.evidence {
+                if let MatchedEvidence::ApiCallArgument { .. } = ev {
+                    score += 15;
+                }
+            }
+        }
+
+        if entropy > 7.8 {
+            score += 15;
+        } else if entropy > 7.2 {
+            score += 10;
+        }
+
+        if let Some(ref pe) = binary.pe {
+            if pe.has_rwx_section() {
+                score += 20;
+            }
+            if pe.has_tls && !pe.tls_callbacks.is_empty() {
+                score += 10;
+            }
+            if pe.number_of_sections > 10 {
+                score += 10;
+            }
+        }
+
+        let final_score = score.min(100) as u8;
+        let level = match final_score {
+            0 => "CLEAN",
+            1..=29 => "LOW RISK",
+            30..=59 => "SUSPICIOUS",
+            60..=79 => "HIGH RISK",
+            _ => "MALICIOUS",
+        }
+        .to_string();
+
+        (final_score, level, tactics.into_iter().collect())
     }
 
     pub fn to_json(&self, pretty: bool) -> Result<String, serde_json::Error> {
@@ -47,18 +130,55 @@ impl ScanResult {
     pub fn render_terminal(&self) -> String {
         let mut out = String::new();
 
-        out.push_str(&format!("Target: {}\n", self.target.bold()));
-        out.push_str(&format!("Size:   {} bytes\n", self.file_size));
-        out.push_str(&format!("Type:   {}\n", self.file_type.cyan()));
-        out.push_str(&format!("SHA256: {}\n", self.hashes.sha256));
-        out.push_str(&format!("Entropy: {:.2} / 8.0\n", self.entropy));
+        out.push_str(&format!("Target:       {}\n", self.target.bold()));
+        out.push_str(&format!("Size:         {} bytes\n", self.file_size));
+        out.push_str(&format!("Type:         {}\n", self.file_type.cyan()));
+        out.push_str(&format!("SHA256:       {}\n", self.hashes.sha256));
+        if let Some(ref imp) = self.hashes.imphash {
+            out.push_str(&format!("IMPHASH:      {}\n", imp.magenta()));
+        }
+        if let Some(ref exp) = self.hashes.exphash {
+            out.push_str(&format!("EXPHASH:      {}\n", exp.magenta()));
+        }
+        out.push_str(&format!("Entropy:      {:.2} / 8.0\n", self.entropy));
 
         if self.matches.is_empty() {
+            out.push_str(&format!(
+                "Threat Level: {}\n",
+                "[CLEAN] (Score: 0/100)".green().bold()
+            ));
             out.push_str(&format!(
                 "\n{}\n",
                 "✓ No rules matched (clean)".green().bold()
             ));
             return out;
+        }
+
+        let threat_display = match self.threat_level.as_str() {
+            "MALICIOUS" => format!("[{}] (Score: {}/100)", self.threat_level, self.threat_score)
+                .on_red()
+                .white()
+                .bold(),
+            "HIGH RISK" => format!("[{}] (Score: {}/100)", self.threat_level, self.threat_score)
+                .red()
+                .bold(),
+            "SUSPICIOUS" => format!("[{}] (Score: {}/100)", self.threat_level, self.threat_score)
+                .yellow()
+                .bold(),
+            "LOW RISK" => format!("[{}] (Score: {}/100)", self.threat_level, self.threat_score)
+                .blue()
+                .bold(),
+            _ => format!("[{}] (Score: {}/100)", self.threat_level, self.threat_score)
+                .green()
+                .bold(),
+        };
+        out.push_str(&format!("Threat Level: {}\n", threat_display));
+
+        if !self.attack_tactics.is_empty() {
+            out.push_str(&format!(
+                "ATT&CK Chain: {}\n",
+                self.attack_tactics.join(" -> ").magenta().bold()
+            ));
         }
 
         out.push_str(&format!(
@@ -163,6 +283,75 @@ impl ScanResult {
                             entropy, threshold
                         ));
                     }
+                    MatchedEvidence::PeCharacteristic { name, detail } => {
+                        out.push_str(&format!(
+                            "    ✓ PE characteristic: {} ({})\n",
+                            name.cyan().bold(),
+                            detail.yellow()
+                        ));
+                    }
+                    MatchedEvidence::Imphash { imphash } => {
+                        out.push_str(&format!(
+                            "    ✓ Import Hash (imphash): {}\n",
+                            imphash.magenta().bold()
+                        ));
+                    }
+                    MatchedEvidence::Exphash { exphash } => {
+                        out.push_str(&format!(
+                            "    ✓ Export Hash (exphash): {}\n",
+                            exphash.magenta().bold()
+                        ));
+                    }
+                    MatchedEvidence::TlsCallback { count, addresses } => {
+                        let addrs_str = if addresses.is_empty() {
+                            String::new()
+                        } else {
+                            format!(
+                                " [{}]",
+                                addresses
+                                    .iter()
+                                    .take(3)
+                                    .map(|a| format!("0x{:x}", a))
+                                    .collect::<Vec<_>>()
+                                    .join(", ")
+                            )
+                        };
+                        out.push_str(&format!(
+                            "    ✓ TLS Callbacks: {} callback(s) registered{}\n",
+                            count.to_string().red().bold(),
+                            addrs_str.dimmed()
+                        ));
+                    }
+                    MatchedEvidence::ApiCallArgument {
+                        api,
+                        argument_name,
+                        value,
+                        constant_name,
+                        address,
+                    } => {
+                        out.push_str(&format!(
+                            "    ✓ API Call Argument: {}!{} = 0x{:x} ({}) at VA 0x{:x}\n",
+                            api.cyan().bold(),
+                            argument_name.yellow(),
+                            value,
+                            constant_name.red().bold(),
+                            address
+                        ));
+                    }
+                    MatchedEvidence::BasicBlockMatch { mnemonics, address } => {
+                        out.push_str(&format!(
+                            "    ✓ Scoped Basic Block at VA 0x{:x}: [{}]\n",
+                            address,
+                            mnemonics.join(" -> ").yellow()
+                        ));
+                    }
+                    MatchedEvidence::FunctionMatch { mnemonics, address } => {
+                        out.push_str(&format!(
+                            "    ✓ Scoped Function at VA 0x{:x}: [{}]\n",
+                            address,
+                            mnemonics.join(" -> ").yellow()
+                        ));
+                    }
                     MatchedEvidence::Custom(msg) => {
                         out.push_str(&format!("    ✓ {}\n", msg));
                     }
@@ -209,11 +398,71 @@ pub fn to_sarif(results: &[ScanResult]) -> Result<String, serde_json::Error> {
                 })
             });
 
-            sarif_results.push(json!({
+            let evidence_bullets: Vec<String> = m
+                .evidence
+                .iter()
+                .map(|e| format!("- {}", e.display_text()))
+                .collect();
+
+            let evidence_section = if !evidence_bullets.is_empty() {
+                format!(
+                    "\n\n### Evidence Indicators\n{}",
+                    evidence_bullets.join("\n")
+                )
+            } else {
+                String::new()
+            };
+
+            let mitre_line = if let Some(ref tech) = m.mitre_technique {
+                format!(
+                    "\n**MITRE ATT&CK:** [{0}](https://attack.mitre.org/techniques/{1}/)",
+                    tech,
+                    tech.replace('.', "/")
+                )
+            } else {
+                String::new()
+            };
+
+            let markdown_text = format!(
+                "**Rule:** `{}` ({:?})\n**Target:** `{}` (SHA-256: `{}`){}\n\n{}\n\n**Verdict Reason:** {}{}",
+                m.rule,
+                m.severity,
+                res.target,
+                res.hashes.sha256,
+                mitre_line,
+                m.description.as_deref().unwrap_or("No description provided."),
+                m.reason,
+                evidence_section
+            );
+
+            let mut related_locations = Vec::new();
+            for ev in &m.evidence {
+                if let MatchedEvidence::StringMatch { id, offsets, .. } = ev {
+                    for (i, &offset) in offsets.iter().take(5).enumerate() {
+                        related_locations.push(json!({
+                            "id": related_locations.len() + 1,
+                            "physicalLocation": {
+                                "artifactLocation": {
+                                    "uri": res.target
+                                },
+                                "region": {
+                                    "byteOffset": offset
+                                }
+                            },
+                            "message": {
+                                "text": format!("String pattern '{}' (occurrence #{})", id, i + 1)
+                            }
+                        }));
+                    }
+                }
+            }
+
+            let mut res_obj = json!({
                 "ruleId": m.rule,
                 "level": level,
                 "message": {
-                    "text": format!("{}: {}", m.rule, m.description.as_deref().unwrap_or(&m.reason))
+                    "text": format!("{}: {}", m.rule, m.description.as_deref().unwrap_or(&m.reason)),
+                    "markdown": markdown_text
                 },
                 "locations": [
                     {
@@ -223,8 +472,29 @@ pub fn to_sarif(results: &[ScanResult]) -> Result<String, serde_json::Error> {
                             }
                         }
                     }
-                ]
-            }));
+                ],
+                "properties": {
+                    "tags": m.tags,
+                    "mitreTechnique": m.mitre_technique,
+                    "author": m.author,
+                    "matchedIndicators": m.matched_indicators,
+                    "evidence": m.evidence,
+                    "sha256": res.hashes.sha256,
+                    "imphash": res.hashes.imphash,
+                    "fileSize": res.file_size,
+                    "fileType": res.file_type,
+                    "entropy": res.entropy,
+                    "threatScore": res.threat_score,
+                    "threatLevel": res.threat_level,
+                    "attackTactics": res.attack_tactics
+                }
+            });
+
+            if !related_locations.is_empty() {
+                res_obj["relatedLocations"] = json!(related_locations);
+            }
+
+            sarif_results.push(res_obj);
         }
     }
 
@@ -269,6 +539,12 @@ pub fn to_stix(results: &[ScanResult]) -> Result<String, serde_json::Error> {
         if let Some(ref ssdeep) = res.hashes.ssdeep {
             hashes_obj.insert("SSDEEP".to_string(), json!(ssdeep));
         }
+        if let Some(ref imp) = res.hashes.imphash {
+            hashes_obj.insert("IMPHASH".to_string(), json!(imp));
+        }
+        if let Some(ref exp) = res.hashes.exphash {
+            hashes_obj.insert("EXPHASH".to_string(), json!(exp));
+        }
 
         objects.push(json!({
             "type": "file",
@@ -281,15 +557,66 @@ pub fn to_stix(results: &[ScanResult]) -> Result<String, serde_json::Error> {
 
         for m in &res.matches {
             let indicator_id = format!("indicator--raya-{}-{}", idx, m.rule);
-            objects.push(json!({
+            let confidence = match m.severity {
+                Severity::Critical => 95,
+                Severity::High => 85,
+                Severity::Medium => 70,
+                Severity::Low => 50,
+                Severity::Info => 30,
+            };
+
+            let mut external_refs = Vec::new();
+            if let Some(ref tech) = m.mitre_technique {
+                external_refs.push(json!({
+                    "source_name": "mitre-attack",
+                    "external_id": tech,
+                    "url": format!("https://attack.mitre.org/techniques/{}/", tech.replace('.', "/"))
+                }));
+            }
+
+            let mut desc = m.description.clone().unwrap_or_else(|| m.rule.clone());
+            if !m.evidence.is_empty() {
+                desc.push_str("\n\nEvidence Indicators:\n");
+                for ev in &m.evidence {
+                    desc.push_str(&format!("- {}\n", ev.display_text()));
+                }
+            }
+            desc.push_str(&format!("\nVerdict: {}", m.reason));
+
+            let mut indicator_obj = json!({
                 "type": "indicator",
                 "spec_version": "2.1",
                 "id": indicator_id,
                 "name": m.rule,
-                "description": m.description,
+                "description": desc,
                 "indicator_types": ["malicious-activity"],
                 "pattern": format!("[file:hashes.'SHA-256' = '{}']", res.hashes.sha256),
-                "pattern_type": "stix"
+                "pattern_type": "stix",
+                "confidence": confidence,
+                "labels": m.tags,
+                "x_raya_severity": format!("{:?}", m.severity).to_lowercase(),
+                "x_raya_threat_score": res.threat_score,
+                "x_raya_threat_level": res.threat_level,
+                "x_raya_attack_tactics": res.attack_tactics,
+                "x_raya_matched_indicators": m.matched_indicators
+            });
+
+            if !external_refs.is_empty() {
+                indicator_obj["external_references"] = json!(external_refs);
+            }
+
+            objects.push(indicator_obj);
+
+            // SDO Relationship: indicator indicates the observed file
+            let rel_id = format!("relationship--raya-{}-{}", idx, m.rule);
+            objects.push(json!({
+                "type": "relationship",
+                "spec_version": "2.1",
+                "id": rel_id,
+                "relationship_type": "indicates",
+                "source_ref": indicator_id,
+                "target_ref": file_sco_id,
+                "description": format!("Rule {} indicates potential malware in {}", m.rule, res.target)
             }));
         }
     }
@@ -318,6 +645,8 @@ mod tests {
                 sha1: "def456".to_string(),
                 md5: "789ghi".to_string(),
                 ssdeep: Some("3:xyz:abc".to_string()),
+                imphash: Some("68f013d7437aa653a8a98a05807afeb1".to_string()),
+                exphash: None,
             },
             entropy: 7.2,
             matches: vec![RuleMatch {
@@ -327,19 +656,39 @@ mod tests {
                 description: Some("Detects ransomware payload".to_string()),
                 author: Some("Analyst".to_string()),
                 mitre_technique: Some("T1486".to_string()),
-                matched_indicators: vec!["$s1".to_string()],
-                evidence: Vec::new(),
-                reason: "Matched".to_string(),
+                matched_indicators: vec!["has_rwx".to_string(), "imphash:68f013d7437aa653a8a98a05807afeb1".to_string()],
+                evidence: vec![
+                    MatchedEvidence::PeCharacteristic {
+                        name: "has_rwx".to_string(),
+                        detail: "RWX section '.text' at VA 0x00001000 (VirtualSize: 1024 bytes, RawSize: 1024 bytes, Flags: 0xE0000060)".to_string(),
+                    },
+                    MatchedEvidence::Imphash {
+                        imphash: "68f013d7437aa653a8a98a05807afeb1".to_string(),
+                    },
+                ],
+                reason: "Condition satisfied with 2 evidence indicator(s)".to_string(),
             }],
             scan_duration_ms: 1.5,
+            threat_score: 95,
+            threat_level: "MALICIOUS".to_string(),
+            attack_tactics: vec!["Impact".to_string()],
         };
 
         let sarif = to_sarif(std::slice::from_ref(&result)).expect("Should serialize SARIF");
         assert!(sarif.contains("\"version\": \"2.1.0\""));
         assert!(sarif.contains("ransomware_detected"));
+        assert!(sarif.contains("Evidence Indicators"));
+        assert!(sarif.contains("properties"));
+        assert!(sarif.contains("has_rwx"));
+        assert!(sarif.contains("68f013d7437aa653a8a98a05807afeb1"));
 
         let stix = to_stix(&[result]).expect("Should serialize STIX");
         assert!(stix.contains("\"type\": \"bundle\""));
         assert!(stix.contains("\"type\": \"indicator\""));
+        assert!(stix.contains("\"type\": \"relationship\""));
+        assert!(stix.contains("\"relationship_type\": \"indicates\""));
+        assert!(stix.contains("\"confidence\": 95"));
+        assert!(stix.contains("mitre-attack"));
+        assert!(stix.contains("Evidence Indicators:"));
     }
 }

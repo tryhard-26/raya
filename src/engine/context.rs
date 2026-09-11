@@ -36,7 +36,147 @@ pub enum MatchedEvidence {
         entropy: f64,
         threshold: f64,
     },
+    PeCharacteristic {
+        name: String,
+        detail: String,
+    },
+    Imphash {
+        imphash: String,
+    },
+    TlsCallback {
+        count: usize,
+        addresses: Vec<u64>,
+    },
+    Exphash {
+        exphash: String,
+    },
+    ApiCallArgument {
+        api: String,
+        argument_name: String,
+        value: u64,
+        constant_name: String,
+        address: u64,
+    },
+    BasicBlockMatch {
+        mnemonics: Vec<String>,
+        address: u64,
+    },
+    FunctionMatch {
+        mnemonics: Vec<String>,
+        address: u64,
+    },
     Custom(String),
+}
+
+impl MatchedEvidence {
+    pub fn display_text(&self) -> String {
+        match self {
+            MatchedEvidence::StringMatch { id, count, offsets } => {
+                let offset_preview: Vec<String> = offsets
+                    .iter()
+                    .take(4)
+                    .map(|o| format!("0x{:x}", o))
+                    .collect();
+                let more = if offsets.len() > 4 {
+                    format!(" (+{} more)", offsets.len() - 4)
+                } else {
+                    String::new()
+                };
+                format!(
+                    "Pattern {} ({} hit(s) at [{}]{})",
+                    id,
+                    count,
+                    offset_preview.join(", "),
+                    more
+                )
+            }
+            MatchedEvidence::PeImport { dll, function } => {
+                format!("Imported API: {}!{}", dll, function)
+            }
+            MatchedEvidence::PeExport { function } => {
+                format!("Exported Symbol: {}", function)
+            }
+            MatchedEvidence::PeSectionEntropy {
+                section,
+                entropy,
+                threshold,
+            } => {
+                format!(
+                    "Section '{}' entropy: {:.2} (threshold: {:.2})",
+                    section, entropy, threshold
+                )
+            }
+            MatchedEvidence::PeSectionFlag { section, flag } => {
+                format!("Section '{}' flag: {}", section, flag)
+            }
+            MatchedEvidence::Quantifier {
+                required,
+                matched,
+                indicators,
+            } => {
+                format!(
+                    "Quantifier: {}/{} indicators satisfied ({})",
+                    matched,
+                    required,
+                    indicators.join(", ")
+                )
+            }
+            MatchedEvidence::FileEntropy { entropy, threshold } => {
+                format!(
+                    "High file entropy: {:.2} (threshold > {:.2})",
+                    entropy, threshold
+                )
+            }
+            MatchedEvidence::PeCharacteristic { name, detail } => {
+                format!("PE characteristic {}: {}", name, detail)
+            }
+            MatchedEvidence::Imphash { imphash } => {
+                format!("Import Hash (imphash): {}", imphash)
+            }
+            MatchedEvidence::TlsCallback { count, addresses } => {
+                let addrs_str = addresses
+                    .iter()
+                    .take(4)
+                    .map(|a| format!("0x{:x}", a))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                format!(
+                    "TLS Callbacks: {} callback(s) registered [{}]",
+                    count, addrs_str
+                )
+            }
+            MatchedEvidence::Exphash { exphash } => {
+                format!("Export Hash (exphash): {}", exphash)
+            }
+            MatchedEvidence::ApiCallArgument {
+                api,
+                argument_name,
+                value,
+                constant_name,
+                address,
+            } => {
+                format!(
+                    "API call '{}' passed {} = 0x{:x} ({}) at VA 0x{:x}",
+                    api, argument_name, value, constant_name, address
+                )
+            }
+            MatchedEvidence::BasicBlockMatch { mnemonics, address } => {
+                format!(
+                    "Basic block at VA 0x{:x} matches scoped sequence: [{}]",
+                    address,
+                    mnemonics.join(" -> ")
+                )
+            }
+            MatchedEvidence::FunctionMatch { mnemonics, address } => {
+                format!(
+                    "Function at VA 0x{:x} matches scoped sequence: [{}]",
+                    address,
+                    mnemonics.join(" -> ")
+                )
+            }
+            MatchedEvidence::Custom(msg) => msg.clone(),
+        }
+    }
 }
 
 pub struct ScanContext<'a> {

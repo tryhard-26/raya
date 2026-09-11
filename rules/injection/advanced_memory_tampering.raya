@@ -1,0 +1,21 @@
+rule advanced_memory_tampering : windows injection evasion {
+    meta:
+        author = "Raya Research Team"
+        description = "Detects advanced process memory manipulation by correlating VirtualAlloc/VirtualProtect with PAGE_EXECUTE_READWRITE constants or scoped basic-block call patterns"
+        severity = "critical"
+        technique = "T1055.002"
+        reference = "https://attack.mitre.org/techniques/T1055/002/"
+
+    strings:
+        $va = "VirtualAlloc" ascii wide
+        $vp = "VirtualProtect" ascii wide
+        $vae = "VirtualAllocEx" ascii wide
+
+    condition:
+        pe.is_pe and (
+            pe.api_call_arg("VirtualAlloc", 0x40)
+            or pe.api_call_arg("VirtualProtect", 0x40)
+            or pe.api_call_arg("VirtualAllocEx", 0x40)
+            or (pe.has_rwx and pe.in_basic_block("push", "call"))
+        )
+}

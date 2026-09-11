@@ -1,3 +1,4 @@
+pub mod archive;
 pub mod ast;
 pub mod binary;
 pub mod cli;
@@ -8,6 +9,7 @@ pub mod parser;
 pub mod report;
 pub mod test_runner;
 
+pub use archive::*;
 pub use ast::*;
 pub use binary::*;
 pub use cli::*;

@@ -201,24 +201,93 @@ impl<'a, 'b> Evaluator<'a, 'b> {
         right: EvalValue,
     ) -> EvalValue {
         match op {
-            BinaryOperator::Eq => EvalValue::Bool(left == right),
+            BinaryOperator::Eq => {
+                let matches = left == right;
+                if matches {
+                    if let (EvalValue::Str(ref s1), EvalValue::Str(_)) = (&left, &right) {
+                        let is_imp = self
+                            .context
+                            .binary
+                            .pe
+                            .as_ref()
+                            .and_then(|p| p.imphash.as_deref())
+                            == Some(s1.as_str());
+                        let is_exp = self
+                            .context
+                            .binary
+                            .pe
+                            .as_ref()
+                            .and_then(|p| p.exphash.as_deref())
+                            == Some(s1.as_str());
+                        if is_imp {
+                            self.context.record_evidence(MatchedEvidence::Imphash {
+                                imphash: s1.clone(),
+                            });
+                        }
+                        if is_exp {
+                            self.context.record_evidence(MatchedEvidence::Exphash {
+                                exphash: s1.clone(),
+                            });
+                        }
+                    }
+                }
+                EvalValue::Bool(matches)
+            }
             BinaryOperator::Neq => EvalValue::Bool(left != right),
             BinaryOperator::Lt => match (left, right) {
-                (EvalValue::Int(a), EvalValue::Int(b)) => EvalValue::Bool(a < b),
+                (EvalValue::Int(a), EvalValue::Int(b)) => {
+                    if a < b && self.context.file_size as i64 == a {
+                        self.context
+                            .record_evidence(MatchedEvidence::Custom(format!(
+                                "filesize: {} bytes < {} bytes",
+                                a, b
+                            )));
+                    }
+                    EvalValue::Bool(a < b)
+                }
                 (EvalValue::Float(a), EvalValue::Float(b)) => EvalValue::Bool(a < b),
                 (EvalValue::Int(a), EvalValue::Float(b)) => EvalValue::Bool((a as f64) < b),
                 (EvalValue::Float(a), EvalValue::Int(b)) => EvalValue::Bool(a < (b as f64)),
                 _ => EvalValue::Bool(false),
             },
             BinaryOperator::Lte => match (left, right) {
-                (EvalValue::Int(a), EvalValue::Int(b)) => EvalValue::Bool(a <= b),
+                (EvalValue::Int(a), EvalValue::Int(b)) => {
+                    if a <= b && self.context.file_size as i64 == a {
+                        self.context
+                            .record_evidence(MatchedEvidence::Custom(format!(
+                                "filesize: {} bytes <= {} bytes",
+                                a, b
+                            )));
+                    }
+                    EvalValue::Bool(a <= b)
+                }
                 (EvalValue::Float(a), EvalValue::Float(b)) => EvalValue::Bool(a <= b),
                 (EvalValue::Int(a), EvalValue::Float(b)) => EvalValue::Bool((a as f64) <= b),
                 (EvalValue::Float(a), EvalValue::Int(b)) => EvalValue::Bool(a <= (b as f64)),
                 _ => EvalValue::Bool(false),
             },
             BinaryOperator::Gt => match (left, right) {
-                (EvalValue::Int(a), EvalValue::Int(b)) => EvalValue::Bool(a > b),
+                (EvalValue::Int(a), EvalValue::Int(b)) => {
+                    if a > b {
+                        if let Some(pe) = &self.context.binary.pe {
+                            if pe.number_of_sections as i64 == a {
+                                self.context
+                                    .record_evidence(MatchedEvidence::PeCharacteristic {
+                                        name: "number_of_sections".to_string(),
+                                        detail: format!("Section count {} > {}", a, b),
+                                    });
+                            }
+                        }
+                        if self.context.file_size as i64 == a {
+                            self.context
+                                .record_evidence(MatchedEvidence::Custom(format!(
+                                    "filesize: {} bytes > {} bytes",
+                                    a, b
+                                )));
+                        }
+                    }
+                    EvalValue::Bool(a > b)
+                }
                 (EvalValue::Float(a), EvalValue::Float(b)) => {
                     self.record_entropy_if_applicable(a, b);
                     EvalValue::Bool(a > b)
@@ -231,7 +300,27 @@ impl<'a, 'b> Evaluator<'a, 'b> {
                 _ => EvalValue::Bool(false),
             },
             BinaryOperator::Gte => match (left, right) {
-                (EvalValue::Int(a), EvalValue::Int(b)) => EvalValue::Bool(a >= b),
+                (EvalValue::Int(a), EvalValue::Int(b)) => {
+                    if a >= b {
+                        if let Some(pe) = &self.context.binary.pe {
+                            if pe.number_of_sections as i64 == a {
+                                self.context
+                                    .record_evidence(MatchedEvidence::PeCharacteristic {
+                                        name: "number_of_sections".to_string(),
+                                        detail: format!("Section count {} >= {}", a, b),
+                                    });
+                            }
+                        }
+                        if self.context.file_size as i64 == a {
+                            self.context
+                                .record_evidence(MatchedEvidence::Custom(format!(
+                                    "filesize: {} bytes >= {} bytes",
+                                    a, b
+                                )));
+                        }
+                    }
+                    EvalValue::Bool(a >= b)
+                }
                 (EvalValue::Float(a), EvalValue::Float(b)) => EvalValue::Bool(a >= b),
                 (EvalValue::Int(a), EvalValue::Float(b)) => EvalValue::Bool((a as f64) >= b),
                 (EvalValue::Float(a), EvalValue::Int(b)) => EvalValue::Bool(a >= (b as f64)),
@@ -387,6 +476,36 @@ impl<'a, 'b> Evaluator<'a, 'b> {
                             }
                         }
                     }
+                    "imphash" => {
+                        if let Some(ref imp) = pe.imphash {
+                            if let Some(EvalValue::Str(target_h)) = evaluated_args.first() {
+                                let matches = imp.eq_ignore_ascii_case(target_h);
+                                if matches {
+                                    self.context.record_evidence(MatchedEvidence::Imphash {
+                                        imphash: imp.clone(),
+                                    });
+                                }
+                                return EvalValue::Bool(matches);
+                            }
+                            return EvalValue::Str(imp.clone());
+                        }
+                    }
+                    "entry_point_in_section" => {
+                        if let Some(EvalValue::Str(sec_name)) = evaluated_args.first() {
+                            let matches = pe.entry_point_in_section(sec_name);
+                            if matches {
+                                self.context
+                                    .record_evidence(MatchedEvidence::PeCharacteristic {
+                                        name: "entry_point_in_section".to_string(),
+                                        detail: format!(
+                                            "Entry point is within section '{}'",
+                                            sec_name
+                                        ),
+                                    });
+                            }
+                            return EvalValue::Bool(matches);
+                        }
+                    }
                     "has_rich_comp_id" => {
                         if let Some(EvalValue::Int(id)) = evaluated_args.first() {
                             return EvalValue::Bool(pe.has_rich_comp_id(*id as u16));
@@ -395,6 +514,110 @@ impl<'a, 'b> Evaluator<'a, 'b> {
                     "has_rich_product_id" => {
                         if let Some(EvalValue::Int(id)) = evaluated_args.first() {
                             return EvalValue::Bool(pe.has_rich_product_id(*id as u16));
+                        }
+                    }
+                    "has_section" => {
+                        if let Some(EvalValue::Str(sec_name)) = evaluated_args.first() {
+                            let found = pe.has_section(sec_name);
+                            if found {
+                                self.context
+                                    .record_evidence(MatchedEvidence::PeCharacteristic {
+                                        name: "has_section".to_string(),
+                                        detail: format!("Section '{}' present in binary", sec_name),
+                                    });
+                            }
+                            return EvalValue::Bool(found);
+                        }
+                    }
+                    "section_entropy" => {
+                        if let Some(EvalValue::Str(sec_name)) = evaluated_args.first() {
+                            let sec_opt = pe
+                                .get_section(sec_name)
+                                .map(|s| (s.name.clone(), s.entropy));
+                            if let Some((name, entropy)) = sec_opt {
+                                self.context
+                                    .record_evidence(MatchedEvidence::PeSectionEntropy {
+                                        section: name,
+                                        entropy,
+                                        threshold: 0.0,
+                                    });
+                                return EvalValue::Float(entropy);
+                            }
+                        }
+                    }
+                    "exphash" => {
+                        if let Some(ref exp) = pe.exphash {
+                            if let Some(EvalValue::Str(target_h)) = evaluated_args.first() {
+                                let matches = exp.eq_ignore_ascii_case(target_h);
+                                if matches {
+                                    self.context.record_evidence(MatchedEvidence::Exphash {
+                                        exphash: exp.clone(),
+                                    });
+                                }
+                                return EvalValue::Bool(matches);
+                            }
+                            return EvalValue::Str(exp.clone());
+                        }
+                    }
+                    "api_call_arg" | "api_call_with_arg" => {
+                        if evaluated_args.len() >= 2 {
+                            if let (EvalValue::Str(api_name), EvalValue::Int(target_val)) =
+                                (&evaluated_args[0], &evaluated_args[1])
+                            {
+                                if let Some(hit) = pe.detect_api_call_arg(
+                                    self.context.data,
+                                    api_name,
+                                    *target_val as u64,
+                                ) {
+                                    self.context.record_evidence(MatchedEvidence::ApiCallArgument {
+                                        api: hit.api_name,
+                                        argument_name: hit.argument_name,
+                                        value: hit.value,
+                                        constant_name: hit.constant_name,
+                                        address: hit.call_ip,
+                                    });
+                                    return EvalValue::Bool(true);
+                                }
+                                return EvalValue::Bool(false);
+                            }
+                        }
+                    }
+                    "in_basic_block" | "has_basic_block" => {
+                        let seq: Vec<&str> = evaluated_args
+                            .iter()
+                            .filter_map(|a| match a {
+                                EvalValue::Str(s) => Some(s.as_str()),
+                                _ => None,
+                            })
+                            .collect();
+                        if !seq.is_empty() {
+                            if let Some(va) = pe.find_basic_block_sequence(self.context.data, &seq) {
+                                self.context.record_evidence(MatchedEvidence::BasicBlockMatch {
+                                    mnemonics: seq.iter().map(|s| s.to_string()).collect(),
+                                    address: va,
+                                });
+                                return EvalValue::Bool(true);
+                            }
+                            return EvalValue::Bool(false);
+                        }
+                    }
+                    "in_function" | "has_function" => {
+                        let seq: Vec<&str> = evaluated_args
+                            .iter()
+                            .filter_map(|a| match a {
+                                EvalValue::Str(s) => Some(s.as_str()),
+                                _ => None,
+                            })
+                            .collect();
+                        if !seq.is_empty() {
+                            if let Some(va) = pe.find_function_sequence(self.context.data, &seq) {
+                                self.context.record_evidence(MatchedEvidence::FunctionMatch {
+                                    mnemonics: seq.iter().map(|s| s.to_string()).collect(),
+                                    address: va,
+                                });
+                                return EvalValue::Bool(true);
+                            }
+                            return EvalValue::Bool(false);
                         }
                     }
                     _ => {}
@@ -465,6 +688,107 @@ impl<'a, 'b> Evaluator<'a, 'b> {
                     let (max_ent, _) =
                         crate::entropy::max_window_entropy(self.context.data, window_size);
                     return EvalValue::Bool(max_ent >= threshold);
+                }
+                _ => {}
+            }
+        }
+
+        if module == "disasm" {
+            let bitness = if let Some(ref pe) = self.context.binary.pe {
+                if pe.is_pe32_plus { 64 } else { 32 }
+            } else if let Some(ref elf) = self.context.binary.elf {
+                if elf.is_64 { 64 } else { 32 }
+            } else {
+                64
+            };
+
+            match function {
+                "in_basic_block" | "has_basic_block" => {
+                    let seq: Vec<&str> = evaluated_args
+                        .iter()
+                        .filter_map(|a| match a {
+                            EvalValue::Str(s) => Some(s.as_str()),
+                            _ => None,
+                        })
+                        .collect();
+                    if !seq.is_empty() {
+                        if let Some(va) = crate::binary::disasm::find_basic_block_sequence(
+                            self.context.data,
+                            bitness,
+                            0x1000,
+                            &seq,
+                        ) {
+                            self.context.record_evidence(MatchedEvidence::BasicBlockMatch {
+                                mnemonics: seq.iter().map(|s| s.to_string()).collect(),
+                                address: va,
+                            });
+                            return EvalValue::Bool(true);
+                        }
+                        return EvalValue::Bool(false);
+                    }
+                }
+                "in_function" | "has_function" => {
+                    let seq: Vec<&str> = evaluated_args
+                        .iter()
+                        .filter_map(|a| match a {
+                            EvalValue::Str(s) => Some(s.as_str()),
+                            _ => None,
+                        })
+                        .collect();
+                    if !seq.is_empty() {
+                        if let Some(va) = crate::binary::disasm::find_function_sequence(
+                            self.context.data,
+                            bitness,
+                            0x1000,
+                            &seq,
+                        ) {
+                            self.context.record_evidence(MatchedEvidence::FunctionMatch {
+                                mnemonics: seq.iter().map(|s| s.to_string()).collect(),
+                                address: va,
+                            });
+                            return EvalValue::Bool(true);
+                        }
+                        return EvalValue::Bool(false);
+                    }
+                }
+                "has_instruction" => {
+                    if let Some(EvalValue::Str(instr)) = evaluated_args.first() {
+                        let matched = crate::binary::disasm::has_mnemonic(
+                            self.context.data,
+                            bitness,
+                            instr,
+                        );
+                        if matched {
+                            self.context.record_evidence(MatchedEvidence::Custom(format!(
+                                "Disassembly matched opcode: {}",
+                                instr
+                            )));
+                        }
+                        return EvalValue::Bool(matched);
+                    }
+                }
+                "has_instruction_sequence" => {
+                    let seq: Vec<&str> = evaluated_args
+                        .iter()
+                        .filter_map(|a| match a {
+                            EvalValue::Str(s) => Some(s.as_str()),
+                            _ => None,
+                        })
+                        .collect();
+                    if !seq.is_empty() {
+                        let matched = crate::binary::disasm::has_mnemonic_sequence(
+                            self.context.data,
+                            bitness,
+                            &seq,
+                        );
+                        if matched {
+                            self.context.record_evidence(MatchedEvidence::Custom(format!(
+                                "Disassembly matched opcode sequence: [{}]",
+                                seq.join(" -> ")
+                            )));
+                        }
+                        return EvalValue::Bool(matched);
+                    }
                 }
                 _ => {}
             }
@@ -570,10 +894,96 @@ impl<'a, 'b> Evaluator<'a, 'b> {
                                     EvalValue::Int(pe.number_of_sections as i64)
                                 }
                                 "entry_point" => EvalValue::Int(pe.entry_point as i64),
-                                "has_rwx" => EvalValue::Bool(pe.has_rwx_section()),
-                                "is_signed" => EvalValue::Bool(pe.is_signed),
+                                "has_rwx" => {
+                                    let details: Vec<String> = pe
+                                        .rwx_sections()
+                                        .iter()
+                                        .map(|sec| {
+                                            format!(
+                                                "RWX section '{}' at VA 0x{:08X} (VirtualSize: {} bytes, RawSize: {} bytes, Flags: 0x{:08X})",
+                                                sec.name, sec.virtual_address, sec.virtual_size, sec.raw_size, sec.characteristics
+                                            )
+                                        })
+                                        .collect();
+                                    let has_rwx = !details.is_empty();
+                                    if has_rwx {
+                                        for detail in details {
+                                            self.context.record_evidence(
+                                                MatchedEvidence::PeCharacteristic {
+                                                    name: "has_rwx".to_string(),
+                                                    detail,
+                                                },
+                                            );
+                                        }
+                                    }
+                                    EvalValue::Bool(has_rwx)
+                                }
+                                "is_signed" => {
+                                    let signed = pe.is_signed;
+                                    if signed {
+                                        self.context.record_evidence(MatchedEvidence::PeCharacteristic {
+                                            name: "is_signed".to_string(),
+                                            detail: "Binary has valid Authenticode Security Directory entry".to_string(),
+                                        });
+                                    }
+                                    EvalValue::Bool(signed)
+                                }
                                 "has_rich_header" => EvalValue::Bool(pe.has_rich_header),
                                 "security_dir_size" => EvalValue::Int(pe.security_dir_size as i64),
+                                "has_tls" => {
+                                    let has = pe.has_tls;
+                                    let count = pe.tls_callbacks.len();
+                                    let addrs = pe.tls_callbacks.clone();
+                                    if has {
+                                        self.context.record_evidence(
+                                            MatchedEvidence::TlsCallback {
+                                                count,
+                                                addresses: addrs,
+                                            },
+                                        );
+                                    }
+                                    EvalValue::Bool(has)
+                                }
+                                "number_of_tls_callbacks" => {
+                                    let count = pe.tls_callbacks.len();
+                                    let addrs = pe.tls_callbacks.clone();
+                                    if count > 0 {
+                                        self.context.record_evidence(
+                                            MatchedEvidence::TlsCallback {
+                                                count,
+                                                addresses: addrs,
+                                            },
+                                        );
+                                    }
+                                    EvalValue::Int(count as i64)
+                                }
+                                "number_of_imports" => {
+                                    EvalValue::Int(pe.number_of_imports() as i64)
+                                }
+                                "number_of_exports" => {
+                                    EvalValue::Int(pe.number_of_exports() as i64)
+                                }
+                                "imphash" => {
+                                    if let Some(ref imp) = pe.imphash {
+                                        EvalValue::Str(imp.clone())
+                                    } else {
+                                        EvalValue::None
+                                    }
+                                }
+                                "exphash" => {
+                                    if let Some(ref exp) = pe.exphash {
+                                        EvalValue::Str(exp.clone())
+                                    } else {
+                                        EvalValue::None
+                                    }
+                                }
+                                "rich_hash" => {
+                                    if let Some(ref rh) = pe.rich_hash {
+                                        EvalValue::Str(rh.clone())
+                                    } else {
+                                        EvalValue::None
+                                    }
+                                }
                                 _ => EvalValue::None,
                             };
                         } else {

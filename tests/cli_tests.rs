@@ -13,7 +13,7 @@ fn test_cli_version() {
 
     assert!(output.status.success());
     let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(stdout.contains("raya 0.1.0"));
+    assert!(stdout.contains(&format!("raya {}", env!("CARGO_PKG_VERSION"))));
     assert!(stdout.contains("Engine:       Raya Core"));
 }
 

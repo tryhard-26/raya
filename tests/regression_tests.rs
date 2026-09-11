@@ -15,8 +15,9 @@ fn test_generate_fixtures() {
         fs::create_dir_all(fixtures_dir).unwrap();
     }
 
-    // 1. Build sample_injection.exe (Emotet-like injection payload)
     let mut injection_data = Vec::new();
+    // Prepend x86 call sequence: push 0x40 (PAGE_EXECUTE_READWRITE); push 0x1000 (MEM_COMMIT); call edx
+    injection_data.extend_from_slice(&[0x6A, 0x40, 0x68, 0x00, 0x10, 0x00, 0x00, 0xFF, 0xD2]);
     injection_data.extend_from_slice(b"VirtualAllocEx\0");
     injection_data.extend_from_slice(b"WriteProcessMemory\0");
     injection_data.extend_from_slice(b"CreateRemoteThread\0");

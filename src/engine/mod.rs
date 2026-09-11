@@ -15,6 +15,9 @@ use std::fs;
 use std::path::Path;
 use std::time::Instant;
 
+use aho_corasick::AhoCorasick;
+use std::collections::HashMap;
+
 pub struct CompiledRule {
     pub rule: Rule,
     pub patterns: CompiledRulePatterns,
@@ -22,6 +25,8 @@ pub struct CompiledRule {
 
 pub struct Engine {
     pub rules: Vec<CompiledRule>,
+    pub global_ac: Option<AhoCorasick>,
+    pub global_pattern_targets: Vec<(usize, String)>,
 }
 
 impl Default for Engine {
@@ -32,29 +37,109 @@ impl Default for Engine {
 
 impl Engine {
     pub fn new() -> Self {
-        Self { rules: Vec::new() }
+        Self {
+            rules: Vec::new(),
+            global_ac: None,
+            global_pattern_targets: Vec::new(),
+        }
     }
 
     pub fn compile_rules(rules: Vec<Rule>) -> Result<Self, MatchError> {
+        let mut global_patterns: Vec<Vec<u8>> = Vec::new();
+        let mut global_pattern_targets: Vec<(usize, String)> = Vec::new();
         let mut compiled = Vec::with_capacity(rules.len());
-        for rule in rules {
+
+        for (rule_idx, rule) in rules.into_iter().enumerate() {
+            for def in &rule.strings {
+                if let crate::ast::StringPattern::Literal {
+                    ref bytes,
+                    ascii,
+                    wide,
+                    nocase,
+                    fullword,
+                    xor,
+                    base64,
+                    base64wide,
+                } = def.pattern
+                {
+                    if ascii
+                        && !wide
+                        && !nocase
+                        && !fullword
+                        && xor.is_none()
+                        && !base64
+                        && !base64wide
+                    {
+                        global_patterns.push(bytes.clone());
+                        global_pattern_targets.push((rule_idx, def.id.clone()));
+                    }
+                }
+            }
+
             let patterns = CompiledRulePatterns::compile(&rule.strings)?;
             compiled.push(CompiledRule { rule, patterns });
         }
-        Ok(Self { rules: compiled })
+
+        let global_ac = if !global_patterns.is_empty() {
+            Some(AhoCorasick::new(&global_patterns)?)
+        } else {
+            None
+        };
+
+        Ok(Self {
+            rules: compiled,
+            global_ac,
+            global_pattern_targets,
+        })
     }
 
     pub fn scan_bytes(&self, data: &[u8], target_name: &str) -> ScanResult {
         let start = Instant::now();
-        let hashes = compute_hashes(data);
+        let mut hashes = compute_hashes(data);
         let entropy = shannon_entropy(data);
         let binary = BinaryAnalysis::analyze(data);
         let file_type = binary.format.to_string();
 
+        if let Some(ref pe) = binary.pe {
+            hashes.imphash = pe.imphash.clone();
+            hashes.exphash = pe.exphash.clone();
+        }
+
         let mut rule_matches = Vec::new();
 
-        for compiled_rule in &self.rules {
-            let string_matches = compiled_rule.patterns.scan(data);
+        // 1. Unified single-pass global Aho-Corasick across ALL rules
+        let mut global_matches_per_rule: Vec<HashMap<String, Vec<StringMatch>>> =
+            vec![HashMap::new(); self.rules.len()];
+
+        if let Some(ac) = &self.global_ac {
+            for mat in ac.find_iter(data) {
+                let (rule_idx, string_id) = &self.global_pattern_targets[mat.pattern()];
+                let offset = mat.start();
+                let length = mat.end() - mat.start();
+                let snippet_end = (offset + length.min(64)).min(data.len());
+                let snippet = data[offset..snippet_end].to_vec();
+
+                global_matches_per_rule[*rule_idx]
+                    .entry(string_id.clone())
+                    .or_default()
+                    .push(StringMatch {
+                        id: string_id.clone(),
+                        offset,
+                        length,
+                        snippet,
+                    });
+            }
+        }
+
+        // 2. Evaluate each rule
+        for (rule_idx, compiled_rule) in self.rules.iter().enumerate() {
+            let mut string_matches = global_matches_per_rule[rule_idx].clone();
+
+            // Run regex and hex patterns specific to this rule
+            let regex_matches = compiled_rule.patterns.scan_regex_only(data);
+            for (k, v) in regex_matches {
+                string_matches.entry(k).or_default().extend(v);
+            }
 
             let mut context = ScanContext::new(
                 data,
@@ -71,6 +156,14 @@ impl Engine {
             };
 
             if matched {
+                // Guarantee automated triage pipelines and analysts never receive a detection alert with empty evidence
+                if context.evidence.is_empty() {
+                    context.record_evidence(MatchedEvidence::Custom(format!(
+                        "rule:{} (condition evaluated to true)",
+                        compiled_rule.rule.name
+                    )));
+                }
+
                 let matched_indicators: Vec<String> = context
                     .evidence
                     .iter()
@@ -83,7 +176,45 @@ impl Engine {
                         MatchedEvidence::PeSectionEntropy { section, .. } => {
                             Some(format!("{}.entropy", section))
                         }
-                        _ => None,
+                        MatchedEvidence::PeSectionFlag { section, flag } => {
+                            Some(format!("{}.{}", section, flag))
+                        }
+                        MatchedEvidence::PeCharacteristic { name, .. } => Some(name.clone()),
+                        MatchedEvidence::Imphash { imphash } => {
+                            Some(format!("imphash:{}", imphash))
+                        }
+                        MatchedEvidence::TlsCallback { count, .. } => {
+                            Some(format!("tls_callbacks:{}", count))
+                        }
+                        MatchedEvidence::Exphash { exphash } => {
+                            Some(format!("exphash:{}", exphash))
+                        }
+                        MatchedEvidence::ApiCallArgument {
+                            api,
+                            argument_name,
+                            value,
+                            ..
+                        } => Some(format!("{}!{}:0x{:x}", api, argument_name, value)),
+                        MatchedEvidence::BasicBlockMatch { address, .. } => {
+                            Some(format!("bb:0x{:x}", address))
+                        }
+                        MatchedEvidence::FunctionMatch { address, .. } => {
+                            Some(format!("fn:0x{:x}", address))
+                        }
+                        MatchedEvidence::FileEntropy { entropy, threshold } => {
+                            Some(format!("entropy:{:.2}>{}", entropy, threshold))
+                        }
+                        MatchedEvidence::Quantifier {
+                            matched,
+                            required,
+                            indicators,
+                        } => Some(format!(
+                            "quantifier:{}/{} ({})",
+                            matched,
+                            required,
+                            indicators.join(",")
+                        )),
+                        MatchedEvidence::Custom(msg) => Some(msg.clone()),
                     })
                     .collect();
 
@@ -109,6 +240,9 @@ impl Engine {
         let duration = start.elapsed();
         let scan_duration_ms = duration.as_secs_f64() * 1000.0;
 
+        let (threat_score, threat_level, attack_tactics) =
+            ScanResult::compute_threat_metrics(&rule_matches, entropy, &binary);
+
         ScanResult {
             target: target_name.to_string(),
             file_size: data.len(),
@@ -117,6 +251,9 @@ impl Engine {
             entropy,
             matches: rule_matches,
             scan_duration_ms,
+            threat_score,
+            threat_level,
+            attack_tactics,
         }
     }
 

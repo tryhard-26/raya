@@ -65,12 +65,14 @@ impl fmt::Display for MetaValue {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum HexToken {
     Exact(u8),
-    Wildcard,       // ??
-    HighNibble(u8), // e.g. 4?
-    LowNibble(u8),  // e.g. ?8
+    Wildcard,                                // ??
+    HighNibble(u8),                          // e.g. 4?
+    LowNibble(u8),                           // e.g. ?8
+    Jump { min: usize, max: Option<usize> }, // e.g. [4-8], [-8], [4-], [4]
+    Alternation(Vec<Vec<HexToken>>),         // e.g. ( 11 22 | 33 44 )
 }
 
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -80,6 +82,10 @@ pub enum StringPattern {
         ascii: bool,
         wide: bool,
         nocase: bool,
+        fullword: bool,
+        xor: Option<(u8, u8)>,
+        base64: bool,
+        base64wide: bool,
     },
     Hex {
         tokens: Vec<HexToken>,
@@ -87,6 +93,7 @@ pub enum StringPattern {
     Regex {
         pattern: String,
         nocase: bool,
+        fullword: bool,
     },
 }
 

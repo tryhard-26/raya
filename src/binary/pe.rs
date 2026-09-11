@@ -44,6 +44,11 @@ pub struct PeInfo {
     pub rich_entries: Vec<RichEntry>,
     pub is_signed: bool,
     pub security_dir_size: u32,
+    pub imphash: Option<String>,
+    pub rich_hash: Option<String>,
+    pub has_tls: bool,
+    pub tls_callbacks: Vec<u64>,
+    pub exphash: Option<String>,
 }
 
 impl PeInfo {
@@ -63,7 +68,56 @@ impl PeInfo {
             rich_entries: Vec::new(),
             is_signed: false,
             security_dir_size: 0,
+            imphash: None,
+            rich_hash: None,
+            has_tls: false,
+            tls_callbacks: Vec::new(),
+            exphash: None,
         }
+    }
+
+    pub fn has_imphash(&self, target: &str) -> bool {
+        self.imphash
+            .as_deref()
+            .map(|h| h.eq_ignore_ascii_case(target))
+            .unwrap_or(false)
+    }
+
+    pub fn has_rich_hash(&self, target: &str) -> bool {
+        self.rich_hash
+            .as_deref()
+            .map(|h| h.eq_ignore_ascii_case(target))
+            .unwrap_or(false)
+    }
+
+    pub fn has_exphash(&self, target: &str) -> bool {
+        self.exphash
+            .as_deref()
+            .map(|h| h.eq_ignore_ascii_case(target))
+            .unwrap_or(false)
+    }
+
+    pub fn has_tls(&self) -> bool {
+        self.has_tls
+    }
+
+    pub fn number_of_tls_callbacks(&self) -> usize {
+        self.tls_callbacks.len()
+    }
+
+    pub fn has_section(&self, target: &str) -> bool {
+        self.get_section(target).is_some()
+    }
+
+    pub fn number_of_imports(&self) -> usize {
+        self.imports
+            .iter()
+            .map(|i| i.functions.len() + i.ordinals.len())
+            .sum()
+    }
+
+    pub fn number_of_exports(&self) -> usize {
+        self.exports.len()
     }
 
     pub fn has_rich_comp_id(&self, target_comp_id: u16) -> bool {
@@ -116,6 +170,13 @@ impl PeInfo {
             .any(|s| s.is_readable && s.is_writable && s.is_executable)
     }
 
+    pub fn rwx_sections(&self) -> Vec<&PeSection> {
+        self.sections
+            .iter()
+            .filter(|s| s.is_readable && s.is_writable && s.is_executable)
+            .collect()
+    }
+
     pub fn entry_point_in_section(&self, name: &str) -> bool {
         if let Some(sec) = self.get_section(name) {
             let ep = self.entry_point as u32;
@@ -158,6 +219,127 @@ impl PeInfo {
             }
         }
         false
+    }
+
+    pub fn find_basic_block_sequence(&self, data: &[u8], seq: &[&str]) -> Option<u64> {
+        let bitness = if self.is_pe32_plus { 64 } else { 32 };
+        for sec in &self.sections {
+            if sec.is_executable && sec.raw_size > 0 {
+                let start = sec.raw_offset as usize;
+                let end = (start + sec.raw_size as usize).min(data.len());
+                if start < data.len() && end > start {
+                    let base_va = self.image_base + sec.virtual_address as u64;
+                    if let Some(va) = crate::binary::disasm::find_basic_block_sequence(
+                        &data[start..end],
+                        bitness,
+                        base_va,
+                        seq,
+                    ) {
+                        return Some(va);
+                    }
+                }
+            }
+        }
+        None
+    }
+
+    pub fn has_basic_block_sequence(&self, data: &[u8], seq: &[&str]) -> bool {
+        self.find_basic_block_sequence(data, seq).is_some()
+    }
+
+    pub fn find_basic_block_all(&self, data: &[u8], required: &[&str]) -> Option<u64> {
+        let bitness = if self.is_pe32_plus { 64 } else { 32 };
+        for sec in &self.sections {
+            if sec.is_executable && sec.raw_size > 0 {
+                let start = sec.raw_offset as usize;
+                let end = (start + sec.raw_size as usize).min(data.len());
+                if start < data.len() && end > start {
+                    let base_va = self.image_base + sec.virtual_address as u64;
+                    if let Some(va) = crate::binary::disasm::find_basic_block_all(
+                        &data[start..end],
+                        bitness,
+                        base_va,
+                        required,
+                    ) {
+                        return Some(va);
+                    }
+                }
+            }
+        }
+        None
+    }
+
+    pub fn has_basic_block_all(&self, data: &[u8], required: &[&str]) -> bool {
+        self.find_basic_block_all(data, required).is_some()
+    }
+
+    pub fn find_function_sequence(&self, data: &[u8], seq: &[&str]) -> Option<u64> {
+        let bitness = if self.is_pe32_plus { 64 } else { 32 };
+        for sec in &self.sections {
+            if sec.is_executable && sec.raw_size > 0 {
+                let start = sec.raw_offset as usize;
+                let end = (start + sec.raw_size as usize).min(data.len());
+                if start < data.len() && end > start {
+                    let base_va = self.image_base + sec.virtual_address as u64;
+                    if let Some(va) = crate::binary::disasm::find_function_sequence(
+                        &data[start..end],
+                        bitness,
+                        base_va,
+                        seq,
+                    ) {
+                        return Some(va);
+                    }
+                }
+            }
+        }
+        None
+    }
+
+    pub fn has_function_sequence(&self, data: &[u8], seq: &[&str]) -> bool {
+        self.find_function_sequence(data, seq).is_some()
+    }
+
+    pub fn detect_api_call_arg(
+        &self,
+        data: &[u8],
+        api_name: &str,
+        target_val: u64,
+    ) -> Option<crate::binary::disasm::ApiCallArgMatch> {
+        let is_imported = self.imports.iter().any(|imp| {
+            imp.functions
+                .iter()
+                .any(|f| f.eq_ignore_ascii_case(api_name))
+        });
+
+        let has_api_ref = is_imported || {
+            let pattern = api_name.as_bytes();
+            data.windows(pattern.len()).any(|w| w == pattern)
+        };
+
+        if !has_api_ref {
+            return None;
+        }
+
+        let bitness = if self.is_pe32_plus { 64 } else { 32 };
+        for sec in &self.sections {
+            if sec.is_executable && sec.raw_size > 0 {
+                let start = sec.raw_offset as usize;
+                let end = (start + sec.raw_size as usize).min(data.len());
+                if start < data.len() && end > start {
+                    let base_va = self.image_base + sec.virtual_address as u64;
+                    if let Some(m) = crate::binary::disasm::detect_api_call_arguments(
+                        &data[start..end],
+                        bitness,
+                        base_va,
+                        api_name,
+                        target_val,
+                    ) {
+                        return Some(m);
+                    }
+                }
+            }
+        }
+        None
     }
 }
 
@@ -288,7 +470,26 @@ pub fn parse_pe(data: &[u8]) -> Option<PeInfo> {
         && sec_dir_offset > 0
         && (sec_dir_offset as usize + sec_dir_size as usize) <= data.len();
 
-    let (has_rich_header, rich_entries) = parse_rich_header(data, e_lfanew);
+    // TLS Directory (Index 9 in Data Directories, each entry 8 bytes: RVA + size)
+    let (tls_rva, tls_size) = if data_dirs_offset + 72 + 8 <= opt_offset + size_of_opt_header {
+        let rva = u32::from_le_bytes([
+            data[data_dirs_offset + 72],
+            data[data_dirs_offset + 73],
+            data[data_dirs_offset + 74],
+            data[data_dirs_offset + 75],
+        ]);
+        let size = u32::from_le_bytes([
+            data[data_dirs_offset + 76],
+            data[data_dirs_offset + 77],
+            data[data_dirs_offset + 78],
+            data[data_dirs_offset + 79],
+        ]);
+        (rva, size)
+    } else {
+        (0, 0)
+    };
+
+    let (has_rich_header, rich_entries, canonical_rich_hash) = parse_rich_header(data, e_lfanew);
 
     // Parse Sections
     let section_headers_offset = opt_offset + size_of_opt_header;
@@ -374,9 +575,11 @@ pub fn parse_pe(data: &[u8]) -> Option<PeInfo> {
             let sec_size = sec.virtual_size.max(sec.raw_size);
             if rva >= sec.virtual_address && rva < sec.virtual_address + sec_size {
                 let delta = rva - sec.virtual_address;
-                let offset = sec.raw_offset as usize + delta as usize;
-                if offset < data.len() {
-                    return Some(offset);
+                if delta < sec.raw_size {
+                    let offset = sec.raw_offset as usize + delta as usize;
+                    if offset < data.len() {
+                        return Some(offset);
+                    }
                 }
             }
         }
@@ -399,8 +602,10 @@ pub fn parse_pe(data: &[u8]) -> Option<PeInfo> {
         }
     };
 
-    // Parse Imports
+    // Parse Imports and compute imphash (Mandiant standard)
     let mut imports = Vec::new();
+    let mut imphash_items = Vec::new();
+
     if import_rva > 0 {
         if let Some(mut desc_offset) = rva_to_offset(import_rva) {
             // Each IMAGE_IMPORT_DESCRIPTOR is 20 bytes
@@ -431,6 +636,14 @@ pub fn parse_pe(data: &[u8]) -> Option<PeInfo> {
 
                 if let Some(name_offset) = rva_to_offset(name_rva) {
                     if let Some(dll_name) = read_ascii_string(name_offset) {
+                        let mut clean_dll = dll_name.to_ascii_lowercase();
+                        for ext in [".dll", ".sys", ".ocx"] {
+                            if clean_dll.ends_with(ext) {
+                                clean_dll.truncate(clean_dll.len() - ext.len());
+                                break;
+                            }
+                        }
+
                         let thunk_rva = if original_first_thunk != 0 {
                             original_first_thunk
                         } else {
@@ -460,13 +673,20 @@ pub fn parse_pe(data: &[u8]) -> Option<PeInfo> {
                                         break;
                                     }
                                     if (thunk_val & 0x8000_0000_0000_0000) != 0 {
-                                        ordinals.push((thunk_val & 0xFFFF) as u16);
+                                        let ord = (thunk_val & 0xFFFF) as u16;
+                                        ordinals.push(ord);
+                                        imphash_items.push(format!("{}.ord{}", clean_dll, ord));
                                     } else {
                                         let hint_name_rva = (thunk_val & 0x7FFF_FFFF) as u32;
                                         if let Some(hn_offset) = rva_to_offset(hint_name_rva) {
                                             // Skip 2-byte hint
                                             if let Some(fn_name) = read_ascii_string(hn_offset + 2)
                                             {
+                                                imphash_items.push(format!(
+                                                    "{}.{}",
+                                                    clean_dll,
+                                                    fn_name.to_ascii_lowercase()
+                                                ));
                                                 functions.push(fn_name);
                                             }
                                         }
@@ -486,12 +706,19 @@ pub fn parse_pe(data: &[u8]) -> Option<PeInfo> {
                                         break;
                                     }
                                     if (thunk_val & 0x8000_0000) != 0 {
-                                        ordinals.push((thunk_val & 0xFFFF) as u16);
+                                        let ord = (thunk_val & 0xFFFF) as u16;
+                                        ordinals.push(ord);
+                                        imphash_items.push(format!("{}.ord{}", clean_dll, ord));
                                     } else {
                                         let hint_name_rva = thunk_val & 0x7FFF_FFFF;
                                         if let Some(hn_offset) = rva_to_offset(hint_name_rva) {
                                             if let Some(fn_name) = read_ascii_string(hn_offset + 2)
                                             {
+                                                imphash_items.push(format!(
+                                                    "{}.{}",
+                                                    clean_dll,
+                                                    fn_name.to_ascii_lowercase()
+                                                ));
                                                 functions.push(fn_name);
                                             }
                                         }
@@ -513,6 +740,25 @@ pub fn parse_pe(data: &[u8]) -> Option<PeInfo> {
             }
         }
     }
+
+    let imphash = if !imphash_items.is_empty() {
+        let joined = imphash_items.join(",");
+        Some(crate::hash::compute_md5(joined.as_bytes()))
+    } else {
+        None
+    };
+
+    let rich_hash = canonical_rich_hash.or_else(|| {
+        if has_rich_header && !rich_entries.is_empty() {
+            let mut parts = Vec::new();
+            for e in &rich_entries {
+                parts.push(format!("{}:{}:{}", e.comp_id, e.product_id, e.count));
+            }
+            Some(crate::hash::compute_md5(parts.join(",").as_bytes()))
+        } else {
+            None
+        }
+    });
 
     // Parse Exports
     let mut exports = Vec::new();
@@ -556,6 +802,87 @@ pub fn parse_pe(data: &[u8]) -> Option<PeInfo> {
         }
     }
 
+    let exphash = if !exports.is_empty() {
+        let mut sorted_exports: Vec<String> =
+            exports.iter().map(|s| s.to_ascii_lowercase()).collect();
+        sorted_exports.sort();
+        Some(crate::hash::compute_md5(
+            sorted_exports.join(",").as_bytes(),
+        ))
+    } else {
+        None
+    };
+
+    // Parse TLS Callbacks
+    let mut has_tls = tls_rva > 0 && tls_size > 0;
+    let mut tls_callbacks = Vec::new();
+    if tls_rva > 0 {
+        if let Some(tls_offset) = rva_to_offset(tls_rva) {
+            has_tls = true;
+            let callbacks_va = if is_pe32_plus {
+                if tls_offset + 32 <= data.len() {
+                    Some(u64::from_le_bytes([
+                        data[tls_offset + 24],
+                        data[tls_offset + 25],
+                        data[tls_offset + 26],
+                        data[tls_offset + 27],
+                        data[tls_offset + 28],
+                        data[tls_offset + 29],
+                        data[tls_offset + 30],
+                        data[tls_offset + 31],
+                    ]))
+                } else {
+                    None
+                }
+            } else if tls_offset + 16 <= data.len() {
+                let va = u32::from_le_bytes([
+                    data[tls_offset + 12],
+                    data[tls_offset + 13],
+                    data[tls_offset + 14],
+                    data[tls_offset + 15],
+                ]);
+                Some(va as u64)
+            } else {
+                None
+            };
+
+            if let Some(cb_va) = callbacks_va {
+                if cb_va >= image_base {
+                    let cb_rva = (cb_va - image_base) as u32;
+                    if let Some(mut cb_offset) = rva_to_offset(cb_rva) {
+                        let step = if is_pe32_plus { 8 } else { 4 };
+                        while cb_offset + step <= data.len() && tls_callbacks.len() < 64 {
+                            let val = if is_pe32_plus {
+                                u64::from_le_bytes([
+                                    data[cb_offset],
+                                    data[cb_offset + 1],
+                                    data[cb_offset + 2],
+                                    data[cb_offset + 3],
+                                    data[cb_offset + 4],
+                                    data[cb_offset + 5],
+                                    data[cb_offset + 6],
+                                    data[cb_offset + 7],
+                                ])
+                            } else {
+                                u32::from_le_bytes([
+                                    data[cb_offset],
+                                    data[cb_offset + 1],
+                                    data[cb_offset + 2],
+                                    data[cb_offset + 3],
+                                ]) as u64
+                            };
+                            if val == 0 {
+                                break;
+                            }
+                            tls_callbacks.push(val);
+                            cb_offset += step;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     Some(PeInfo {
         is_pe: true,
         is_pe32_plus,
@@ -571,12 +898,17 @@ pub fn parse_pe(data: &[u8]) -> Option<PeInfo> {
         rich_entries,
         is_signed,
         security_dir_size: sec_dir_size,
+        imphash,
+        rich_hash,
+        has_tls,
+        tls_callbacks,
+        exphash,
     })
 }
 
-fn parse_rich_header(data: &[u8], e_lfanew: usize) -> (bool, Vec<RichEntry>) {
+fn parse_rich_header(data: &[u8], e_lfanew: usize) -> (bool, Vec<RichEntry>, Option<String>) {
     if e_lfanew < 0x80 || e_lfanew > data.len() {
-        return (false, Vec::new());
+        return (false, Vec::new(), None);
     }
     let stub = &data[0x40..e_lfanew];
     let mut rich_pos = None;
@@ -589,11 +921,11 @@ fn parse_rich_header(data: &[u8], e_lfanew: usize) -> (bool, Vec<RichEntry>) {
 
     let rich_off = match rich_pos {
         Some(pos) => pos,
-        None => return (false, Vec::new()),
+        None => return (false, Vec::new(), None),
     };
 
     if rich_off + 8 > e_lfanew {
-        return (false, Vec::new());
+        return (false, Vec::new(), None);
     }
 
     let xor_key = u32::from_le_bytes([
@@ -619,13 +951,28 @@ fn parse_rich_header(data: &[u8], e_lfanew: usize) -> (bool, Vec<RichEntry>) {
         curr -= 4;
     }
 
-    let start_entries = match dans_pos {
-        Some(pos) => pos + 16,
-        None => return (false, Vec::new()),
+    let dans_offset = match dans_pos {
+        Some(pos) => pos,
+        None => return (false, Vec::new(), None),
     };
 
+    // Calculate standard Mandiant/pefile Rich header hash (MD5 of decrypted buffer DanS -> Rich)
+    let mut decrypted_rich = Vec::with_capacity(rich_off.saturating_sub(dans_offset));
+    let mut p = dans_offset;
+    while p + 4 <= rich_off {
+        let dword = u32::from_le_bytes([data[p], data[p + 1], data[p + 2], data[p + 3]]) ^ xor_key;
+        decrypted_rich.extend_from_slice(&dword.to_le_bytes());
+        p += 4;
+    }
+    let canonical_rich_hash = if !decrypted_rich.is_empty() {
+        Some(crate::hash::compute_md5(&decrypted_rich))
+    } else {
+        None
+    };
+
+    let start_entries = dans_offset + 16;
     if start_entries >= rich_off {
-        return (true, Vec::new());
+        return (true, Vec::new(), canonical_rich_hash);
     }
 
     let mut entries = Vec::new();
@@ -650,5 +997,5 @@ fn parse_rich_header(data: &[u8], e_lfanew: usize) -> (bool, Vec<RichEntry>) {
         off += 8;
     }
 
-    (true, entries)
+    (true, entries, canonical_rich_hash)
 }

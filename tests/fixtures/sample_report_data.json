@@ -1,0 +1,210 @@
+{
+  "target": "samples/malware/wannacry_ed01ebfb.exe",
+  "file_size": 3514368,
+  "file_type": "PE32 (Windows GUI Executable)",
+  "hashes": {
+    "sha256": "ed01ebfbc9eb5bbea545af4d01bf5f1071661840480439c6e5babe8e080e41aa",
+    "sha1": "5ff465acf83874241e477514bb3b6159b58c04f6",
+    "md5": "84c82835a5d21bbcf75a61706d8ab549",
+    "imphash": "68f013d7437aa653a8a98a05807afeb1",
+    "exphash": "b8a92f03c14d5e6a7b8c9d0e1f2a3b4c",
+    "rich_hash": "a15a8166d11e5ad744dae4be8832a26c",
+    "ssdeep": "98304:eGfSiWbZ92XN7y1mK4fG98X4yZwJk0mPq:eGfSjbZ2XN7yK4fX4yZwJk0m"
+  },
+  "entropy": 7.64,
+  "pe_info": {
+    "is_pe": true,
+    "is_pe32_plus": false,
+    "is_dll": false,
+    "machine": 332,
+    "entry_point": 182744,
+    "image_base": 4194304,
+    "number_of_sections": 4,
+    "has_tls": true,
+    "number_of_tls_callbacks": 2,
+    "tls_callbacks": [4255248, 4255312],
+    "is_signed": false,
+    "has_rich_header": true,
+    "sections": [
+      {
+        "name": ".text",
+        "virtual_address": 4096,
+        "virtual_size": 225280,
+        "raw_size": 229376,
+        "entropy": 6.58,
+        "is_readable": true,
+        "is_writable": true,
+        "is_executable": true
+      },
+      {
+        "name": ".rdata",
+        "virtual_address": 233472,
+        "virtual_size": 32768,
+        "raw_size": 36864,
+        "entropy": 5.21,
+        "is_readable": true,
+        "is_writable": false,
+        "is_executable": false
+      },
+      {
+        "name": ".data",
+        "virtual_address": 270336,
+        "virtual_size": 16384,
+        "raw_size": 12288,
+        "entropy": 4.85,
+        "is_readable": true,
+        "is_writable": true,
+        "is_executable": false
+      },
+      {
+        "name": ".rsrc",
+        "virtual_address": 286720,
+        "virtual_size": 3227648,
+        "raw_size": 3231744,
+        "entropy": 7.98,
+        "is_readable": true,
+        "is_writable": false,
+        "is_executable": false
+      }
+    ]
+  },
+  "matches": [
+    {
+      "rule": "ransomware_wannacry",
+      "severity": "critical",
+      "tags": [
+        "windows",
+        "ransomware",
+        "threat_triage"
+      ],
+      "description": "Detects WannaCry ransomware artifacts, command execution strings, and drop mechanisms",
+      "author": "Raya Research Team",
+      "mitre_technique": "T1486 (Data Encrypted for Impact)",
+      "matched_indicators": [
+        "$tasksche",
+        "$icacls",
+        "$attrib",
+        "$magic_header",
+        "$wncry_ext"
+      ],
+      "evidence": [
+        {
+          "StringMatch": {
+            "id": "$magic_header",
+            "count": 1,
+            "offsets": [
+              33554432
+            ]
+          }
+        },
+        {
+          "StringMatch": {
+            "id": "$tasksche",
+            "count": 1,
+            "offsets": [
+              67992
+            ]
+          }
+        },
+        {
+          "StringMatch": {
+            "id": "$icacls",
+            "count": 1,
+            "offsets": [
+              68024
+            ]
+          }
+        },
+        {
+          "StringMatch": {
+            "id": "$wncry_ext",
+            "count": 4,
+            "offsets": [
+              68210,
+              68450,
+              69120
+            ]
+          }
+        },
+        {
+          "Imphash": {
+            "imphash": "68f013d7437aa653a8a98a05807afeb1"
+          }
+        }
+      ],
+      "reason": "Condition satisfied with 5 evidence indicator(s) including Imphash match"
+    },
+    {
+      "rule": "tls_anti_analysis",
+      "severity": "high",
+      "tags": [
+        "windows",
+        "evasion",
+        "anti_debug"
+      ],
+      "description": "Detects TLS callbacks used for pre-entrypoint execution and anti-debugging evasion",
+      "author": "Raya Research Team",
+      "mitre_technique": "T1055 (Process Injection)",
+      "matched_indicators": [
+        "tls_callbacks:2"
+      ],
+      "evidence": [
+        {
+          "TlsCallback": {
+            "count": 2,
+            "addresses": [
+              4255248,
+              4255312
+            ]
+          }
+        },
+        {
+          "PeCharacteristic": {
+            "name": "tls_callbacks",
+            "detail": "2 TLS callback(s) detected prior to AddressOfEntryPoint (0x0002CA38)"
+          }
+        }
+      ],
+      "reason": "2 TLS pre-execution callbacks registered in PE TLS directory table"
+    },
+    {
+      "rule": "packed_pe_indicators",
+      "severity": "high",
+      "tags": [
+        "windows",
+        "packer",
+        "obfuscation"
+      ],
+      "description": "Identifies indicators of runtime packing, compressed sections, or high-entropy executable code",
+      "author": "Raya Research Team",
+      "mitre_technique": "T1027.002 (Software Packing)",
+      "matched_indicators": [
+        "pe.has_rwx",
+        ".rsrc.entropy"
+      ],
+      "evidence": [
+        {
+          "PeCharacteristic": {
+            "name": "has_rwx",
+            "detail": "Executable and writable (RWX) section detected (.text: 0xE0000060)"
+          }
+        },
+        {
+          "PeSectionEntropy": {
+            "section": ".rsrc",
+            "entropy": 7.98,
+            "threshold": 7.0
+          }
+        },
+        {
+          "PeSectionFlag": {
+            "section": ".text",
+            "flag": "RWX_PERMISSIONS"
+          }
+        }
+      ],
+      "reason": "Binary contains RWX code section (.text) and high-entropy resource payload archive (7.98)"
+    }
+  ],
+  "scan_duration_ms": 1.24
+}

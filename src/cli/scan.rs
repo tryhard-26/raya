@@ -20,6 +20,7 @@ pub struct ScanArgs {
     pub threads: Option<usize>,
     pub pid: Option<u32>,
     pub format: Option<String>,
+    pub password: Option<String>,
 }
 
 pub fn run_scan(args: ScanArgs) -> i32 {
@@ -80,6 +81,7 @@ pub fn run_scan(args: ScanArgs) -> i32 {
             args.json,
             args.quiet,
             args.format.as_deref(),
+            args.password.as_deref(),
         )
     } else if target.is_dir() {
         scan_directory(
@@ -89,6 +91,7 @@ pub fn run_scan(args: ScanArgs) -> i32 {
             args.json,
             args.quiet,
             args.format.as_deref(),
+            args.password.as_deref(),
         )
     } else {
         eprintln!(
@@ -116,9 +119,10 @@ fn scan_single_file(
     json: bool,
     quiet: bool,
     format: Option<&str>,
+    password: Option<&str>,
 ) -> i32 {
-    let result = match engine.scan_file(path) {
-        Ok(res) => res,
+    let data = match std::fs::read(path) {
+        Ok(d) => d,
         Err(e) => {
             eprintln!(
                 "{} Failed to scan file '{}': {}",
@@ -130,13 +134,132 @@ fn scan_single_file(
         }
     };
 
+    if crate::archive::is_zip(&data) {
+        if let Ok(entries) = crate::archive::extract_zip_bytes(&data, password) {
+            if !entries.is_empty() {
+                let nested_results: Vec<ScanResult> = entries
+                    .into_iter()
+                    .map(|entry| {
+                        let label = format!("{} -> {}", path.display(), entry.name);
+                        engine.scan_bytes(&entry.data, &label)
+                    })
+                    .collect();
+
+                return render_multi_results(&nested_results, json, quiet, format);
+            }
+        }
+    }
+
+    let result = engine.scan_bytes(&data, &path.display().to_string());
     render_single_result(&result, json, quiet, format)
+}
+
+fn render_multi_results(
+    results: &[ScanResult],
+    json: bool,
+    quiet: bool,
+    format: Option<&str>,
+) -> i32 {
+    if results.len() == 1 {
+        return render_single_result(&results[0], json, quiet, format);
+    }
+
+    let fmt = format.unwrap_or(if json { "json" } else { "text" });
+
+    match fmt {
+        "sarif" => match to_sarif(results) {
+            Ok(s) => println!("{}", s),
+            Err(e) => {
+                eprintln!("{} Failed to serialize SARIF: {}", "ERROR:".red().bold(), e);
+                return 2;
+            }
+        },
+        "stix" => match to_stix(results) {
+            Ok(s) => println!("{}", s),
+            Err(e) => {
+                eprintln!("{} Failed to serialize STIX: {}", "ERROR:".red().bold(), e);
+                return 2;
+            }
+        },
+        "json" => match serde_json::to_string_pretty(results) {
+            Ok(j) => println!("{}", j),
+            Err(e) => {
+                eprintln!("{} Failed to serialize JSON: {}", "ERROR:".red().bold(), e);
+                return 2;
+            }
+        },
+        _ => {
+            if quiet {
+                for res in results {
+                    if res.has_matches() {
+                        for m in &res.matches {
+                            println!("{}: {}", res.target, m.rule);
+                        }
+                    }
+                }
+            } else {
+                for res in results {
+                    print!("{}", res.render_terminal());
+                }
+            }
+        }
+    }
+
+    if results.iter().any(|r| r.has_matches()) {
+        1
+    } else {
+        0
+    }
 }
 
 fn render_single_result(result: &ScanResult, json: bool, quiet: bool, format: Option<&str>) -> i32 {
     let fmt = format.unwrap_or(if json { "json" } else { "text" });
 
     match fmt {
+        "pdf" => {
+            let json_str = match result.to_json(true) {
+                Ok(j) => j,
+                Err(e) => {
+                    eprintln!("{} Failed to serialize JSON: {}", "ERROR:".red().bold(), e);
+                    return 2;
+                }
+            };
+            let out_file = format!(
+                "raya_report_{}.pdf",
+                &result.hashes.sha256[..12.min(result.hashes.sha256.len())]
+            );
+            let py_paths = ["/tmp/raya_venv/bin/python3", "python3"];
+            let mut generated = false;
+            for py in &py_paths {
+                if let Ok(mut child) = std::process::Command::new(py)
+                    .arg("scripts/generate_pdf_report.py")
+                    .arg("--output")
+                    .arg(&out_file)
+                    .stdin(std::process::Stdio::piped())
+                    .stdout(std::process::Stdio::inherit())
+                    .stderr(std::process::Stdio::inherit())
+                    .spawn()
+                {
+                    if let Some(mut stdin) = child.stdin.take() {
+                        use std::io::Write;
+                        let _ = stdin.write_all(json_str.as_bytes());
+                    }
+                    if let Ok(status) = child.wait() {
+                        if status.success() {
+                            generated = true;
+                            break;
+                        }
+                    }
+                }
+            }
+            if !generated {
+                eprintln!(
+                    "{} Failed to generate PDF report using scripts/generate_pdf_report.py",
+                    "ERROR:".red().bold()
+                );
+                return 2;
+            }
+        }
         "sarif" => match to_sarif(std::slice::from_ref(result)) {
             Ok(s) => println!("{}", s),
             Err(e) => {
@@ -185,6 +308,7 @@ fn scan_directory(
     json: bool,
     quiet: bool,
     format: Option<&str>,
+    password: Option<&str>,
 ) -> i32 {
     let start_time = Instant::now();
     let walker = if recursive {
@@ -200,17 +324,31 @@ fn scan_directory(
         .map(|e| e.path().to_path_buf())
         .collect();
 
-    let total_files = target_files.len();
-
-    // Parallel scan using Rayon
+    // Parallel scan using Rayon with transparent archive inspection
     let scan_results: Vec<Result<ScanResult, (PathBuf, std::io::Error)>> = target_files
         .par_iter()
-        .map(|path| match engine.scan_file(path) {
-            Ok(res) => Ok(res),
-            Err(e) => Err((path.clone(), e)),
+        .flat_map(|path| match std::fs::read(path) {
+            Ok(data) => {
+                if crate::archive::is_zip(&data) {
+                    if let Ok(entries) = crate::archive::extract_zip_bytes(&data, password) {
+                        if !entries.is_empty() {
+                            return entries
+                                .into_iter()
+                                .map(|entry| {
+                                    let label = format!("{} -> {}", path.display(), entry.name);
+                                    Ok(engine.scan_bytes(&entry.data, &label))
+                                })
+                                .collect::<Vec<_>>();
+                        }
+                    }
+                }
+                vec![Ok(engine.scan_bytes(&data, &path.display().to_string()))]
+            }
+            Err(e) => vec![Err((path.clone(), e))],
         })
         .collect();
 
+    let total_files = scan_results.len();
     let elapsed = start_time.elapsed();
 
     let mut matched_results = Vec::new();

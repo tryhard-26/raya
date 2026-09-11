@@ -153,8 +153,9 @@ impl Parser {
                 TokenKind::Strings => {
                     self.advance();
                     self.expect(TokenKind::Colon, "expected ':' after 'strings'")?;
+                    let mut anon_count = 0;
                     while matches!(self.peek_kind(), TokenKind::StringIdent(_)) {
-                        let str_def = self.parse_string_definition()?;
+                        let str_def = self.parse_string_definition(&mut anon_count)?;
                         strings.push(str_def);
                     }
                 }
@@ -221,9 +222,16 @@ impl Parser {
         }
     }
 
-    fn parse_string_definition(&mut self) -> Result<StringDefinition, ParseError> {
+    fn parse_string_definition(
+        &mut self,
+        anon_count: &mut usize,
+    ) -> Result<StringDefinition, ParseError> {
         let id_tok = self.advance().clone();
         let id = match id_tok.kind {
+            TokenKind::StringIdent(ref s) if s == "$" => {
+                *anon_count += 1;
+                format!("$_anon_{}", anon_count)
+            }
             TokenKind::StringIdent(s) => s,
             other => {
                 return Err(ParseError {
@@ -241,22 +249,57 @@ impl Parser {
                 let mut ascii = false;
                 let mut wide = false;
                 let mut nocase = false;
+                let mut fullword = false;
+                let mut xor = None;
+                let mut base64 = false;
+                let mut base64wide = false;
 
                 while matches!(
                     self.peek_kind(),
                     TokenKind::Ascii | TokenKind::Wide | TokenKind::Nocase
-                ) || matches!(self.peek_kind(), TokenKind::Ident(ref id) if id == "fullword" || id == "private" || id == "xor" || id == "base64")
+                ) || matches!(self.peek_kind(), TokenKind::Ident(ref id) if id == "fullword" || id == "private" || id == "xor" || id == "base64" || id == "base64wide")
                 {
                     match self.advance().kind {
                         TokenKind::Ascii => ascii = true,
                         TokenKind::Wide => wide = true,
                         TokenKind::Nocase => nocase = true,
+                        TokenKind::Ident(ref id) if id == "fullword" => fullword = true,
+                        TokenKind::Ident(ref id) if id == "base64" => base64 = true,
+                        TokenKind::Ident(ref id) if id == "base64wide" => base64wide = true,
+                        TokenKind::Ident(ref id) if id == "xor" => {
+                            if self.match_token(&TokenKind::OpenParen) {
+                                let min_key = match self.peek_kind() {
+                                    TokenKind::IntLit(i) => {
+                                        let v = (*i).clamp(0, 255) as u8;
+                                        self.advance();
+                                        v
+                                    }
+                                    _ => 0,
+                                };
+                                self.expect(TokenKind::Minus, "expected '-' in xor range")?;
+                                let max_key = match self.peek_kind() {
+                                    TokenKind::IntLit(i) => {
+                                        let v = (*i).clamp(0, 255) as u8;
+                                        self.advance();
+                                        v
+                                    }
+                                    _ => 255,
+                                };
+                                self.expect(
+                                    TokenKind::CloseParen,
+                                    "expected ')' closing xor range",
+                                )?;
+                                xor = Some((min_key, max_key));
+                            } else {
+                                xor = Some((0, 255));
+                            }
+                        }
                         _ => {}
                     }
                 }
 
                 // If neither ascii nor wide is explicitly specified, default to ascii
-                if !ascii && !wide {
+                if !ascii && !wide && !base64 && !base64wide {
                     ascii = true;
                 }
 
@@ -265,10 +308,29 @@ impl Parser {
                     ascii,
                     wide,
                     nocase,
+                    fullword,
+                    xor,
+                    base64,
+                    base64wide,
                 }
             }
             TokenKind::HexPattern(tokens) => StringPattern::Hex { tokens },
-            TokenKind::RegexPattern { pattern, nocase } => StringPattern::Regex { pattern, nocase },
+            TokenKind::RegexPattern { pattern, nocase } => {
+                let mut fullword = false;
+                while matches!(self.peek_kind(), TokenKind::Ident(ref id) if id == "fullword" || id == "private")
+                {
+                    if let TokenKind::Ident(ref id) = self.advance().kind {
+                        if id == "fullword" {
+                            fullword = true;
+                        }
+                    }
+                }
+                StringPattern::Regex {
+                    pattern,
+                    nocase,
+                    fullword,
+                }
+            }
             other => {
                 return Err(ParseError {
                     location: val_tok.location,
