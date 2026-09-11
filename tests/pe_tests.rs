@@ -138,9 +138,9 @@ fn test_pe_api_call_arg_tracking() {
     // push 0x1000 (MEM_COMMIT)
     // call edx
     let code = [
-        0x6A, 0x40,                         // push 0x40
-        0x68, 0x00, 0x10, 0x00, 0x00,       // push 0x1000
-        0xFF, 0xD2,                         // call edx
+        0x6A, 0x40, // push 0x40
+        0x68, 0x00, 0x10, 0x00, 0x00, // push 0x1000
+        0xFF, 0xD2, // call edx
     ];
 
     let mock_pe = build_mock_pe(
@@ -191,10 +191,10 @@ fn test_basic_block_scoping_rule() {
     // BB1: xor eax, eax; jmp +4
     // BB2: push 0x40; call edx
     let code = [
-        0x31, 0xC0,             // xor eax, eax
-        0xEB, 0x04,             // jmp +4
-        0x6A, 0x40,             // push 0x40
-        0xFF, 0xD2,             // call edx
+        0x31, 0xC0, // xor eax, eax
+        0xEB, 0x04, // jmp +4
+        0x6A, 0x40, // push 0x40
+        0xFF, 0xD2, // call edx
     ];
 
     let mock_pe = build_mock_pe(
@@ -224,6 +224,8 @@ fn test_basic_block_scoping_rule() {
     let rules_cross = raya::parser::parse_rules_from_str(rule_cross).unwrap();
     let engine_cross = raya::engine::Engine::compile_rules(rules_cross).unwrap();
     let res_cross = engine_cross.scan_bytes(&mock_pe, "bb_test.exe");
-    assert!(!res_cross.has_matches(), "Should not match across jump boundary");
+    assert!(
+        !res_cross.has_matches(),
+        "Should not match across jump boundary"
+    );
 }
-

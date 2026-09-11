@@ -3,7 +3,8 @@
 
 use std::io::{Cursor, Read, Seek};
 
-pub const DEFAULT_ARCHIVE_PASSWORDS: &[&str] = &["infected", "malware", "password", "clean", "1234"];
+pub const DEFAULT_ARCHIVE_PASSWORDS: &[&str] =
+    &["infected", "malware", "password", "clean", "1234"];
 const MAX_DECOMPRESSED_FILE_SIZE: usize = 128 * 1024 * 1024; // 128 MB zip-bomb defense
 
 /// Checks whether raw bytes start with standard ZIP local or central header magic bytes.
@@ -111,12 +112,14 @@ mod tests {
 
     #[test]
     fn test_real_malware_archive_extraction() {
-        let zip_path = "samples/malware/ed01ebfbc9eb5bbea545af4d01bf5f1071661840480439c6e5babe8e080e41aa.zip";
+        let zip_path =
+            "samples/malware/ed01ebfbc9eb5bbea545af4d01bf5f1071661840480439c6e5babe8e080e41aa.zip";
         if !std::path::Path::new(zip_path).exists() {
             return;
         }
         let file = std::fs::File::open(zip_path).expect("Archive should open");
-        let entries = extract_zip(file, Some("infected")).expect("Should extract with password 'infected'");
+        let entries =
+            extract_zip(file, Some("infected")).expect("Should extract with password 'infected'");
         assert_eq!(entries.len(), 1);
         eprintln!("Extracted entry name: '{}'", entries[0].name);
         assert!(entries[0].name.ends_with(".exe"));

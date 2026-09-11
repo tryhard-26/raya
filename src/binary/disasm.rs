@@ -98,15 +98,16 @@ pub fn extract_basic_blocks(code: &[u8], bitness: u32, base_ip: u64) -> Vec<Basi
         last_ip = ip + instr.len() as u64;
 
         let flow = instr.flow_control();
-        let terminates_block = match flow {
+        let terminates_block = matches!(
+            flow,
             FlowControl::UnconditionalBranch
-            | FlowControl::ConditionalBranch
-            | FlowControl::Return
-            | FlowControl::IndirectBranch
-            | FlowControl::Interrupt => true,
-            FlowControl::Call | FlowControl::IndirectCall => true,
-            _ => false,
-        };
+                | FlowControl::ConditionalBranch
+                | FlowControl::Return
+                | FlowControl::IndirectBranch
+                | FlowControl::Interrupt
+                | FlowControl::Call
+                | FlowControl::IndirectCall
+        );
 
         if terminates_block {
             blocks.push(BasicBlock {
@@ -275,18 +276,18 @@ pub fn detect_api_call_arguments(
 ) -> Option<ApiCallArgMatch> {
     let blocks = extract_basic_blocks(code, bitness, base_ip);
     for bb in blocks {
-        if bb.terminates_with_call || bb.mnemonics.iter().any(|m| m == "call") {
-            if bb.immediates.contains(&target_val) {
-                let (arg_name, const_name) = resolve_constant_name(target_api, target_val)
-                    .unwrap_or(("dwValue", "UNKNOWN_CONSTANT"));
-                return Some(ApiCallArgMatch {
-                    api_name: target_api.to_string(),
-                    argument_name: arg_name.to_string(),
-                    value: target_val,
-                    constant_name: const_name.to_string(),
-                    call_ip: bb.end_ip,
-                });
-            }
+        if (bb.terminates_with_call || bb.mnemonics.iter().any(|m| m == "call"))
+            && bb.immediates.contains(&target_val)
+        {
+            let (arg_name, const_name) = resolve_constant_name(target_api, target_val)
+                .unwrap_or(("dwValue", "UNKNOWN_CONSTANT"));
+            return Some(ApiCallArgMatch {
+                api_name: target_api.to_string(),
+                argument_name: arg_name.to_string(),
+                value: target_val,
+                constant_name: const_name.to_string(),
+                call_ip: bb.end_ip,
+            });
         }
     }
     None
@@ -354,7 +355,7 @@ mod tests {
     fn test_disasm_sequence() {
         let code = [
             0xB8, 0x01, 0x00, 0x00, 0x00, // mov eax, 1
-            0x31, 0xDB,                   // xor ebx, ebx
+            0x31, 0xDB, // xor ebx, ebx
             0xE8, 0x09, 0x00, 0x00, 0x00, // call +9
         ];
 
@@ -370,17 +371,21 @@ mod tests {
         // Basic block 2: push 0x40; call edx
         let code = [
             0xB8, 0x01, 0x00, 0x00, 0x00, // mov eax, 1
-            0x31, 0xDB,                   // xor ebx, ebx
-            0xEB, 0x05,                   // jmp +5
-            0x6A, 0x40,                   // push 0x40 (PAGE_EXECUTE_READWRITE)
-            0xFF, 0xD2,                   // call edx
+            0x31, 0xDB, // xor ebx, ebx
+            0xEB, 0x05, // jmp +5
+            0x6A, 0x40, // push 0x40 (PAGE_EXECUTE_READWRITE)
+            0xFF, 0xD2, // call edx
         ];
 
         let bbs = extract_basic_blocks(&code, 32, 0x401000);
         assert_eq!(bbs.len(), 2);
 
         // Sequence spanning across jump should NOT match in same basic block
-        assert!(!has_basic_block_sequence(&code, 32, &["xor", "jmp", "push"]));
+        assert!(!has_basic_block_sequence(
+            &code,
+            32,
+            &["xor", "jmp", "push"]
+        ));
 
         // Sequences within basic block match
         assert!(has_basic_block_sequence(&code, 32, &["mov", "xor", "jmp"]));
@@ -391,9 +396,9 @@ mod tests {
     fn test_api_call_argument_tracking() {
         // x86 32-bit: push 0x40 (PAGE_EXECUTE_READWRITE); push 0x1000 (MEM_COMMIT); call edx
         let code = [
-            0x6A, 0x40,                   // push 0x40
+            0x6A, 0x40, // push 0x40
             0x68, 0x00, 0x10, 0x00, 0x00, // push 0x1000
-            0xFF, 0xD2,                   // call edx
+            0xFF, 0xD2, // call edx
         ];
 
         let res = detect_api_call_arguments(&code, 32, 0x401000, "VirtualAlloc", 0x40);

@@ -569,13 +569,15 @@ impl<'a, 'b> Evaluator<'a, 'b> {
                                     api_name,
                                     *target_val as u64,
                                 ) {
-                                    self.context.record_evidence(MatchedEvidence::ApiCallArgument {
-                                        api: hit.api_name,
-                                        argument_name: hit.argument_name,
-                                        value: hit.value,
-                                        constant_name: hit.constant_name,
-                                        address: hit.call_ip,
-                                    });
+                                    self.context.record_evidence(
+                                        MatchedEvidence::ApiCallArgument {
+                                            api: hit.api_name,
+                                            argument_name: hit.argument_name,
+                                            value: hit.value,
+                                            constant_name: hit.constant_name,
+                                            address: hit.call_ip,
+                                        },
+                                    );
                                     return EvalValue::Bool(true);
                                 }
                                 return EvalValue::Bool(false);
@@ -591,11 +593,13 @@ impl<'a, 'b> Evaluator<'a, 'b> {
                             })
                             .collect();
                         if !seq.is_empty() {
-                            if let Some(va) = pe.find_basic_block_sequence(self.context.data, &seq) {
-                                self.context.record_evidence(MatchedEvidence::BasicBlockMatch {
-                                    mnemonics: seq.iter().map(|s| s.to_string()).collect(),
-                                    address: va,
-                                });
+                            if let Some(va) = pe.find_basic_block_sequence(self.context.data, &seq)
+                            {
+                                self.context
+                                    .record_evidence(MatchedEvidence::BasicBlockMatch {
+                                        mnemonics: seq.iter().map(|s| s.to_string()).collect(),
+                                        address: va,
+                                    });
                                 return EvalValue::Bool(true);
                             }
                             return EvalValue::Bool(false);
@@ -611,10 +615,11 @@ impl<'a, 'b> Evaluator<'a, 'b> {
                             .collect();
                         if !seq.is_empty() {
                             if let Some(va) = pe.find_function_sequence(self.context.data, &seq) {
-                                self.context.record_evidence(MatchedEvidence::FunctionMatch {
-                                    mnemonics: seq.iter().map(|s| s.to_string()).collect(),
-                                    address: va,
-                                });
+                                self.context
+                                    .record_evidence(MatchedEvidence::FunctionMatch {
+                                        mnemonics: seq.iter().map(|s| s.to_string()).collect(),
+                                        address: va,
+                                    });
                                 return EvalValue::Bool(true);
                             }
                             return EvalValue::Bool(false);
@@ -695,9 +700,17 @@ impl<'a, 'b> Evaluator<'a, 'b> {
 
         if module == "disasm" {
             let bitness = if let Some(ref pe) = self.context.binary.pe {
-                if pe.is_pe32_plus { 64 } else { 32 }
+                if pe.is_pe32_plus {
+                    64
+                } else {
+                    32
+                }
             } else if let Some(ref elf) = self.context.binary.elf {
-                if elf.is_64 { 64 } else { 32 }
+                if elf.is_64 {
+                    64
+                } else {
+                    32
+                }
             } else {
                 64
             };
@@ -718,10 +731,11 @@ impl<'a, 'b> Evaluator<'a, 'b> {
                             0x1000,
                             &seq,
                         ) {
-                            self.context.record_evidence(MatchedEvidence::BasicBlockMatch {
-                                mnemonics: seq.iter().map(|s| s.to_string()).collect(),
-                                address: va,
-                            });
+                            self.context
+                                .record_evidence(MatchedEvidence::BasicBlockMatch {
+                                    mnemonics: seq.iter().map(|s| s.to_string()).collect(),
+                                    address: va,
+                                });
                             return EvalValue::Bool(true);
                         }
                         return EvalValue::Bool(false);
@@ -742,10 +756,11 @@ impl<'a, 'b> Evaluator<'a, 'b> {
                             0x1000,
                             &seq,
                         ) {
-                            self.context.record_evidence(MatchedEvidence::FunctionMatch {
-                                mnemonics: seq.iter().map(|s| s.to_string()).collect(),
-                                address: va,
-                            });
+                            self.context
+                                .record_evidence(MatchedEvidence::FunctionMatch {
+                                    mnemonics: seq.iter().map(|s| s.to_string()).collect(),
+                                    address: va,
+                                });
                             return EvalValue::Bool(true);
                         }
                         return EvalValue::Bool(false);
@@ -753,16 +768,14 @@ impl<'a, 'b> Evaluator<'a, 'b> {
                 }
                 "has_instruction" => {
                     if let Some(EvalValue::Str(instr)) = evaluated_args.first() {
-                        let matched = crate::binary::disasm::has_mnemonic(
-                            self.context.data,
-                            bitness,
-                            instr,
-                        );
+                        let matched =
+                            crate::binary::disasm::has_mnemonic(self.context.data, bitness, instr);
                         if matched {
-                            self.context.record_evidence(MatchedEvidence::Custom(format!(
-                                "Disassembly matched opcode: {}",
-                                instr
-                            )));
+                            self.context
+                                .record_evidence(MatchedEvidence::Custom(format!(
+                                    "Disassembly matched opcode: {}",
+                                    instr
+                                )));
                         }
                         return EvalValue::Bool(matched);
                     }
@@ -782,10 +795,11 @@ impl<'a, 'b> Evaluator<'a, 'b> {
                             &seq,
                         );
                         if matched {
-                            self.context.record_evidence(MatchedEvidence::Custom(format!(
-                                "Disassembly matched opcode sequence: [{}]",
-                                seq.join(" -> ")
-                            )));
+                            self.context
+                                .record_evidence(MatchedEvidence::Custom(format!(
+                                    "Disassembly matched opcode sequence: [{}]",
+                                    seq.join(" -> ")
+                                )));
                         }
                         return EvalValue::Bool(matched);
                     }

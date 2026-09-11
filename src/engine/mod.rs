@@ -167,54 +167,54 @@ impl Engine {
                 let matched_indicators: Vec<String> = context
                     .evidence
                     .iter()
-                    .filter_map(|e| match e {
-                        MatchedEvidence::StringMatch { id, .. } => Some(id.clone()),
+                    .map(|e| match e {
+                        MatchedEvidence::StringMatch { id, .. } => id.clone(),
                         MatchedEvidence::PeImport { dll, function } => {
-                            Some(format!("{}!{}", dll, function))
+                            format!("{}!{}", dll, function)
                         }
-                        MatchedEvidence::PeExport { function } => Some(function.clone()),
+                        MatchedEvidence::PeExport { function } => function.clone(),
                         MatchedEvidence::PeSectionEntropy { section, .. } => {
-                            Some(format!("{}.entropy", section))
+                            format!("{}.entropy", section)
                         }
                         MatchedEvidence::PeSectionFlag { section, flag } => {
-                            Some(format!("{}.{}", section, flag))
+                            format!("{}.{}", section, flag)
                         }
-                        MatchedEvidence::PeCharacteristic { name, .. } => Some(name.clone()),
+                        MatchedEvidence::PeCharacteristic { name, .. } => name.clone(),
                         MatchedEvidence::Imphash { imphash } => {
-                            Some(format!("imphash:{}", imphash))
+                            format!("imphash:{}", imphash)
                         }
                         MatchedEvidence::TlsCallback { count, .. } => {
-                            Some(format!("tls_callbacks:{}", count))
+                            format!("tls_callbacks:{}", count)
                         }
                         MatchedEvidence::Exphash { exphash } => {
-                            Some(format!("exphash:{}", exphash))
+                            format!("exphash:{}", exphash)
                         }
                         MatchedEvidence::ApiCallArgument {
                             api,
                             argument_name,
                             value,
                             ..
-                        } => Some(format!("{}!{}:0x{:x}", api, argument_name, value)),
+                        } => format!("{}!{}:0x{:x}", api, argument_name, value),
                         MatchedEvidence::BasicBlockMatch { address, .. } => {
-                            Some(format!("bb:0x{:x}", address))
+                            format!("bb:0x{:x}", address)
                         }
                         MatchedEvidence::FunctionMatch { address, .. } => {
-                            Some(format!("fn:0x{:x}", address))
+                            format!("fn:0x{:x}", address)
                         }
                         MatchedEvidence::FileEntropy { entropy, threshold } => {
-                            Some(format!("entropy:{:.2}>{}", entropy, threshold))
+                            format!("entropy:{:.2}>{}", entropy, threshold)
                         }
                         MatchedEvidence::Quantifier {
                             matched,
                             required,
                             indicators,
-                        } => Some(format!(
+                        } => format!(
                             "quantifier:{}/{} ({})",
                             matched,
                             required,
                             indicators.join(",")
-                        )),
-                        MatchedEvidence::Custom(msg) => Some(msg.clone()),
+                        ),
+                        MatchedEvidence::Custom(msg) => msg.clone(),
                     })
                     .collect();
 
