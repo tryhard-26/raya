@@ -34,14 +34,17 @@ raya --version
 | Task | Command |
 | :--- | :--- |
 | **Scan a single file** | `raya scan sample.exe --rules rules/` |
+| **Inspect binary forensic triage** | `raya inspect sample.exe` |
+| **Inspect binary as JSON** | `raya inspect sample.exe --json` |
+| **Transpile legacy YARA rule** | `raya convert rule.yar -o rule.raya` |
 | **Scan an entire directory** | `raya scan /path/to/samples/ --rules rules/` |
-| **Scan stdin (stream / pipe)** | `cat sample.bin \| raya scan - --rules rules/` |
+| **Scan stdin (stream / pipe)** | `cat sample.bin | raya scan - --rules rules/` |
 | **Scan password-protected archive** | `raya scan drop.zip --rules rules/ --password infected` |
 | **Export to OASIS SARIF v2.1.0** | `raya scan sample.exe --rules rules/ --format sarif > report.sarif` |
 | **Export to OASIS STIX 2.1** | `raya scan sample.exe --rules rules/ --format stix > bundle.json` |
 | **Export to Machine-Readable JSON** | `raya scan sample.exe --rules rules/ --format json > report.json` |
-| **Precompile rules to binary cache** | `raya scan sample.exe --rules rules/ --save-rules compiled.rc` |
-| **Scan using compiled rules** | `raya scan sample.exe --load-rules compiled.rc` |
+| **Precompile rules to binary cache** | `raya compile rules/ -o compiled.bin` |
+| **Scan using compiled rules** | `raya scan sample.exe -c compiled.bin` |
 | **Validate rule syntax** | `raya check rules/ --verbose` |
 | **Execute test specification** | `raya test tests/fixtures/test_spec.json` |
 | **Run pattern-matching benchmarks** | `raya bench --rules rules/` |

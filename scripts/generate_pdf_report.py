@@ -142,7 +142,7 @@ def generate_pdf(report_data, output_path):
 
     # Title & Header
     story.append(Paragraph("RAYA BINARY TRIAGE & FORENSIC REPORT", title_style))
-    story.append(Paragraph("High-Throughput Threat Detection & Mandiant FLARE Telemetry", subtitle_style))
+    story.append(Paragraph("High-Throughput Threat Detection & Binary Forensics Engine", subtitle_style))
     story.append(HRFlowable(width="100%", thickness=1.5, color=colors.HexColor("#0F172A"), spaceAfter=12))
 
     # Threat Banner
@@ -206,7 +206,7 @@ def generate_pdf(report_data, output_path):
         [Paragraph("<b>SHA-256:</b>", table_cell_bold), Paragraph(hashes.get("sha256", "N/A"), code_style)],
     ]
     if hashes.get("imphash"):
-        hash_rows.append([Paragraph("<b>IMPHASH (Mandiant):</b>", table_cell_bold), Paragraph(f"<b>{hashes['imphash']}</b>", code_style)])
+        hash_rows.append([Paragraph("<b>IMPHASH:</b>", table_cell_bold), Paragraph(f"<b>{hashes['imphash']}</b>", code_style)])
     if hashes.get("exphash"):
         hash_rows.append([Paragraph("<b>EXPHASH:</b>", table_cell_bold), Paragraph(f"<b>{hashes['exphash']}</b>", code_style)])
     if hashes.get("rich_hash"):
@@ -310,7 +310,7 @@ def generate_pdf(report_data, output_path):
                         pc = ev["PeCharacteristic"]
                         evidence_lines.append(f"• PE Characteristic: <b>{pc.get('name')}</b> — {pc.get('detail')}")
                     elif "Imphash" in ev:
-                        evidence_lines.append(f"• Mandiant Imphash Match: <code>{ev['Imphash'].get('imphash')}</code>")
+                        evidence_lines.append(f"• Import Hash (Imphash) Match: <code>{ev['Imphash'].get('imphash')}</code>")
                     elif "TlsCallback" in ev:
                         tc = ev["TlsCallback"]
                         addrs = ", ".join([f"0x{a:x}" for a in tc.get("addresses", [])[:3]])
@@ -323,6 +323,20 @@ def generate_pdf(report_data, output_path):
                     elif "PeSectionFlag" in ev:
                         psf = ev["PeSectionFlag"]
                         evidence_lines.append(f"• Suspicious Section Flag: <code>{psf.get('section')}</code> has <b>{psf.get('flag')}</b>")
+                    elif "StackString" in ev:
+                        ss = ev["StackString"]
+                        evidence_lines.append(f"• Deobfuscated Stack String: <b>\"{ss.get('value')}\"</b> at VA 0x{ss.get('offset', 0):X}")
+                    elif "CryptoConstant" in ev:
+                        cc = ev["CryptoConstant"]
+                        evidence_lines.append(f"• Cryptographic Constant [{cc.get('algorithm')}]: {cc.get('description')} at offset 0x{cc.get('offset', 0):X}")
+                    elif "DotNetIndicator" in ev:
+                        evidence_lines.append(f"• .NET CLR Indicator: <code>{ev['DotNetIndicator'].get('indicator')}</code>")
+                    elif "GoIndicator" in ev:
+                        evidence_lines.append(f"• Go Runtime Indicator: <code>{ev['GoIndicator'].get('indicator')}</code>")
+                    elif "RustIndicator" in ev:
+                        evidence_lines.append(f"• Rust Runtime Indicator: <code>{ev['RustIndicator'].get('indicator')}</code>")
+                    elif "RichAnomaly" in ev:
+                        evidence_lines.append(f"• Rich Header Anomaly: <b>{ev['RichAnomaly'].get('detail')}</b>")
                     elif "Custom" in ev:
                         evidence_lines.append(f"• {ev['Custom']}")
                     else:

@@ -42,6 +42,8 @@ pub struct PeInfo {
     pub exports: Vec<String>,
     pub has_rich_header: bool,
     pub rich_entries: Vec<RichEntry>,
+    pub rich_checksum_mismatch: bool,
+    pub is_rich_checksum_valid: Option<bool>,
     pub is_signed: bool,
     pub security_dir_size: u32,
     pub imphash: Option<String>,
@@ -49,6 +51,8 @@ pub struct PeInfo {
     pub has_tls: bool,
     pub tls_callbacks: Vec<u64>,
     pub exphash: Option<String>,
+    pub dotnet: Option<crate::binary::dotnet::DotNetInfo>,
+    pub stack_strings: Vec<crate::binary::disasm::StackString>,
 }
 
 impl PeInfo {
@@ -66,6 +70,8 @@ impl PeInfo {
             exports: Vec::new(),
             has_rich_header: false,
             rich_entries: Vec::new(),
+            rich_checksum_mismatch: false,
+            is_rich_checksum_valid: None,
             is_signed: false,
             security_dir_size: 0,
             imphash: None,
@@ -73,6 +79,8 @@ impl PeInfo {
             has_tls: false,
             tls_callbacks: Vec::new(),
             exphash: None,
+            dotnet: None,
+            stack_strings: Vec::new(),
         }
     }
 
@@ -88,6 +96,21 @@ impl PeInfo {
             .as_deref()
             .map(|h| h.eq_ignore_ascii_case(target))
             .unwrap_or(false)
+    }
+
+    pub fn rich_checksum_mismatch(&self) -> bool {
+        self.rich_checksum_mismatch
+    }
+
+    pub fn has_dotnet(&self) -> bool {
+        self.dotnet.as_ref().map(|d| d.is_dotnet).unwrap_or(false)
+    }
+
+    pub fn has_stack_string(&self, target: &str) -> bool {
+        let lower = target.to_ascii_lowercase();
+        self.stack_strings
+            .iter()
+            .any(|s| s.value.to_ascii_lowercase().contains(&lower))
     }
 
     pub fn has_exphash(&self, target: &str) -> bool {
@@ -489,7 +512,32 @@ pub fn parse_pe(data: &[u8]) -> Option<PeInfo> {
         (0, 0)
     };
 
-    let (has_rich_header, rich_entries, canonical_rich_hash) = parse_rich_header(data, e_lfanew);
+    // CLR Runtime Header Directory (Index 14 in Data Directories, offset 112)
+    let (clr_rva, clr_size) = if data_dirs_offset + 112 + 8 <= opt_offset + size_of_opt_header {
+        let rva = u32::from_le_bytes([
+            data[data_dirs_offset + 112],
+            data[data_dirs_offset + 113],
+            data[data_dirs_offset + 114],
+            data[data_dirs_offset + 115],
+        ]);
+        let size = u32::from_le_bytes([
+            data[data_dirs_offset + 116],
+            data[data_dirs_offset + 117],
+            data[data_dirs_offset + 118],
+            data[data_dirs_offset + 119],
+        ]);
+        (rva, size)
+    } else {
+        (0, 0)
+    };
+
+    let (
+        has_rich_header,
+        rich_entries,
+        canonical_rich_hash,
+        rich_checksum_mismatch,
+        is_rich_checksum_valid,
+    ) = parse_rich_header(data, e_lfanew);
 
     // Parse Sections
     let section_headers_offset = opt_offset + size_of_opt_header;
@@ -583,6 +631,12 @@ pub fn parse_pe(data: &[u8]) -> Option<PeInfo> {
                 }
             }
         }
+        None
+    };
+
+    let dotnet = if clr_rva > 0 && clr_size > 0 {
+        crate::binary::dotnet::parse_dotnet(data, clr_rva, clr_size, rva_to_offset)
+    } else {
         None
     };
 
@@ -883,6 +937,23 @@ pub fn parse_pe(data: &[u8]) -> Option<PeInfo> {
         }
     }
 
+    // Extract stack strings from executable sections
+    let mut stack_strings = Vec::new();
+    for sec in &sections {
+        if sec.is_executable && sec.raw_size > 0 && (sec.raw_offset as usize) < data.len() {
+            let start = sec.raw_offset as usize;
+            let end = (start + (sec.raw_size as usize).min(256 * 1024)).min(data.len());
+            let sec_bytes = &data[start..end];
+            let bitness = if is_pe32_plus { 64 } else { 32 };
+            let strings = crate::binary::disasm::extract_stack_strings(
+                sec_bytes,
+                bitness,
+                image_base + sec.virtual_address as u64,
+            );
+            stack_strings.extend(strings);
+        }
+    }
+
     Some(PeInfo {
         is_pe: true,
         is_pe32_plus,
@@ -896,6 +967,8 @@ pub fn parse_pe(data: &[u8]) -> Option<PeInfo> {
         exports,
         has_rich_header,
         rich_entries,
+        rich_checksum_mismatch,
+        is_rich_checksum_valid,
         is_signed,
         security_dir_size: sec_dir_size,
         imphash,
@@ -903,12 +976,17 @@ pub fn parse_pe(data: &[u8]) -> Option<PeInfo> {
         has_tls,
         tls_callbacks,
         exphash,
+        dotnet,
+        stack_strings,
     })
 }
 
-fn parse_rich_header(data: &[u8], e_lfanew: usize) -> (bool, Vec<RichEntry>, Option<String>) {
+fn parse_rich_header(
+    data: &[u8],
+    e_lfanew: usize,
+) -> (bool, Vec<RichEntry>, Option<String>, bool, Option<bool>) {
     if e_lfanew < 0x80 || e_lfanew > data.len() {
-        return (false, Vec::new(), None);
+        return (false, Vec::new(), None, false, None);
     }
     let stub = &data[0x40..e_lfanew];
     let mut rich_pos = None;
@@ -921,11 +999,11 @@ fn parse_rich_header(data: &[u8], e_lfanew: usize) -> (bool, Vec<RichEntry>, Opt
 
     let rich_off = match rich_pos {
         Some(pos) => pos,
-        None => return (false, Vec::new(), None),
+        None => return (false, Vec::new(), None, false, None),
     };
 
     if rich_off + 8 > e_lfanew {
-        return (false, Vec::new(), None);
+        return (false, Vec::new(), None, false, None);
     }
 
     let xor_key = u32::from_le_bytes([
@@ -953,7 +1031,7 @@ fn parse_rich_header(data: &[u8], e_lfanew: usize) -> (bool, Vec<RichEntry>, Opt
 
     let dans_offset = match dans_pos {
         Some(pos) => pos,
-        None => return (false, Vec::new(), None),
+        None => return (false, Vec::new(), None, false, None),
     };
 
     // Calculate standard Mandiant/pefile Rich header hash (MD5 of decrypted buffer DanS -> Rich)
@@ -971,31 +1049,53 @@ fn parse_rich_header(data: &[u8], e_lfanew: usize) -> (bool, Vec<RichEntry>, Opt
     };
 
     let start_entries = dans_offset + 16;
-    if start_entries >= rich_off {
-        return (true, Vec::new(), canonical_rich_hash);
-    }
-
     let mut entries = Vec::new();
-    let mut off = start_entries;
-    while off + 8 <= rich_off {
-        let dword1 =
-            u32::from_le_bytes([data[off], data[off + 1], data[off + 2], data[off + 3]]) ^ xor_key;
-        let dword2 =
-            u32::from_le_bytes([data[off + 4], data[off + 5], data[off + 6], data[off + 7]])
-                ^ xor_key;
+    if start_entries < rich_off {
+        let mut off = start_entries;
+        while off + 8 <= rich_off {
+            let dword1 =
+                u32::from_le_bytes([data[off], data[off + 1], data[off + 2], data[off + 3]])
+                    ^ xor_key;
+            let dword2 =
+                u32::from_le_bytes([data[off + 4], data[off + 5], data[off + 6], data[off + 7]])
+                    ^ xor_key;
 
-        let comp_id = (dword1 & 0xFFFF) as u16;
-        let product_id = ((dword1 >> 16) & 0xFFFF) as u16;
-        let count = dword2;
+            let comp_id = (dword1 & 0xFFFF) as u16;
+            let product_id = ((dword1 >> 16) & 0xFFFF) as u16;
+            let count = dword2;
 
-        entries.push(RichEntry {
-            comp_id,
-            product_id,
-            count,
-        });
+            entries.push(RichEntry {
+                comp_id,
+                product_id,
+                count,
+            });
 
-        off += 8;
+            off += 8;
+        }
     }
 
-    (true, entries, canonical_rich_hash)
+    // Verify Rich Header Checksum against xor_key
+    let mut calc_checksum: u32 = e_lfanew as u32;
+    for (i, &b) in data.iter().enumerate().take(0x3C.min(data.len())) {
+        calc_checksum = calc_checksum.wrapping_add((b as u32).rotate_left((i as u32) & 0x1F));
+    }
+    if dans_offset > 0x40 {
+        for (i, &b) in data
+            .iter()
+            .enumerate()
+            .take(dans_offset.min(data.len()))
+            .skip(0x40)
+        {
+            calc_checksum = calc_checksum.wrapping_add((b as u32).rotate_left((i as u32) & 0x1F));
+        }
+    }
+    for e in &entries {
+        let comp_val = ((e.product_id as u32) << 16) | (e.comp_id as u32);
+        calc_checksum = calc_checksum.wrapping_add(comp_val.rotate_left(e.count & 0x1F));
+    }
+
+    let is_valid = calc_checksum == xor_key;
+    let mismatch = !is_valid;
+
+    (true, entries, canonical_rich_hash, mismatch, Some(is_valid))
 }

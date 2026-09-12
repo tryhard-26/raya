@@ -32,3 +32,5 @@ raya.md
 Raya.md
 RAYA.md
 sample_report.pdf
+__pycache__/
+*.pyc

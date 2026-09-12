@@ -390,6 +390,45 @@ impl ScanResult {
                             mnemonics.join(" -> ").yellow()
                         ));
                     }
+                    MatchedEvidence::StackString {
+                        value,
+                        offset,
+                        is_wide,
+                    } => {
+                        out.push_str(&format!(
+                            "    ✓ Deobfuscated Stack String: \"{}\" at VA 0x{:x}{}\n",
+                            value.green().bold(),
+                            offset,
+                            if *is_wide { " (UTF-16LE)" } else { "" }
+                        ));
+                    }
+                    MatchedEvidence::CryptoConstant {
+                        algorithm,
+                        description,
+                        offset,
+                    } => {
+                        out.push_str(&format!(
+                            "    ✓ Cryptographic Constant [{}]: {} at offset 0x{:x}\n",
+                            algorithm.magenta().bold(),
+                            description,
+                            offset
+                        ));
+                    }
+                    MatchedEvidence::DotNetIndicator { indicator } => {
+                        out.push_str(&format!("    ✓ .NET CLR Indicator: {}\n", indicator.cyan()));
+                    }
+                    MatchedEvidence::GoIndicator { indicator } => {
+                        out.push_str(&format!("    ✓ Golang Indicator: {}\n", indicator.cyan()));
+                    }
+                    MatchedEvidence::RustIndicator { indicator } => {
+                        out.push_str(&format!("    ✓ Rust Indicator: {}\n", indicator.cyan()));
+                    }
+                    MatchedEvidence::RichAnomaly { detail } => {
+                        out.push_str(&format!(
+                            "    ✓ Rich Header Anomaly: {}\n",
+                            detail.red().bold()
+                        ));
+                    }
                     MatchedEvidence::Custom(msg) => {
                         out.push_str(&format!("    ✓ {}\n", msg));
                     }

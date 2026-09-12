@@ -1,0 +1,10 @@
+rule embedded_cryptographic_sboxes : generic crypto {
+    meta:
+        author = "Raya Research Team"
+        description = "Detects cryptographic S-boxes and initialization vectors (AES, ChaCha20, MD5, SHA-256)"
+        severity = "low"
+        technique = "T1027"
+
+    condition:
+        crypto.has("AES") or crypto.has("ChaCha20") or crypto.has("SHA-256")
+}

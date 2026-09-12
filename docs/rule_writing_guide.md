@@ -1,6 +1,6 @@
 # Raya Rule Authoring Guide
 
-Raya uses a domain-specific language (DSL) inspired by YARA, while offering enhanced capabilities for binary structure analysis, instruction disassembly, and evidence tracing.
+Raya uses a domain-specific language (DSL) inspired by YARA, while offering enhanced capabilities for binary structure analysis, instruction disassembly, cryptographic constant identification, runtime introspection, and evidence tracing.
 
 ---
 
@@ -115,6 +115,7 @@ Raya supports full boolean logic:
 | `pe.has_tls` | True if the binary defines a Thread Local Storage (TLS) directory. |
 | `pe.tls_callbacks` | Array of registered TLS callback function addresses. |
 | `pe.imphash` | Calculated import hash string. |
+| `pe.exphash` | Calculated export hash string. |
 | `pe.import("dll", "func")` | True if the PE imports the specified API. |
 | `pe.export("func")` | True if the PE exports the specified symbol. |
 | `pe.has_section(".name")` | True if the section exists in the section table. |
@@ -122,15 +123,59 @@ Raya supports full boolean logic:
 | `pe.api_call_arg("API", val)`| True if the API is called with the specified argument constant. |
 | `pe.in_basic_block(seq...)`| True if instruction mnemonics occur within the same basic block. |
 | `pe.in_function(seq...)` | True if instruction mnemonics occur within the same function. |
+| `pe.has_stack_string` | True if any stack strings were extracted from executable sections. |
+| `pe.stack_string("str")` | True if a specific string was deobfuscated from stack frame writes. |
+| `pe.stack_strings_count` | Number of deobfuscated stack strings found. |
+| `pe.has_rich_header` | True if the binary contains a Microsoft PE Rich header. |
+| `pe.rich_checksum_mismatch` | True if the Rich header checksum does NOT match the XOR key (forgery). |
+| `pe.is_rich_checksum_valid` | True if the Rich header checksum successfully validates against the XOR key. |
+| `pe.rich_comp_id(id)` | True if the Rich header contains the specified compiler component ID. |
+| `pe.rich_product_id(id)` | True if the Rich header contains the specified product/build ID. |
+
+### .NET / CLR Module (`dotnet`)
+
+| Function / Property | Description |
+| :--- | :--- |
+| `dotnet.is_dotnet` | True if the binary contains a valid CLI runtime header (Data Directory 14). |
+| `dotnet.user_string("str")` | True if `#US` user strings stream contains the specified string. |
+| `dotnet.has_type("name")` | True if `#Strings` stream defines the specified Type name. |
+| `dotnet.has_method("name")` | True if `#Strings` stream defines the specified Method name. |
+| `dotnet.assembly_name` | Assembly name extracted from metadata. |
+| `dotnet.clr_version` | CLR runtime version string (e.g. `v4.0.30319`). |
+
+### Cryptographic Constants Module (`crypto`)
+
+| Function / Property | Description |
+| :--- | :--- |
+| `crypto.has("algorithm")` | True if constants for algorithm (`AES`, `ChaCha20`, `MD5`, `SHA-256`, `CRC32`, `SM4`) are found. |
+| `crypto.constants_count` | Total count of detected cryptographic primitives and S-boxes. |
+| `has_crypto` | Global boolean flag; true if any cryptographic primitive constant was found. |
+
+### Go Module (`go`)
+
+| Function / Property | Description |
+| :--- | :--- |
+| `go.is_go` | True if binary contains Go runtime `.gopclntab` structure. |
+| `go.has_function("name")` | True if `.gopclntab` contains the specified function symbol. |
+| `go.has_package("name")` | True if any symbol belongs to the specified Go package. |
+| `go.version` | Detected Go compiler version string (e.g. `go1.21.0`). |
+
+### Rust Module (`rust`)
+
+| Function / Property | Description |
+| :--- | :--- |
+| `rust.is_rust` | True if Rust compiler markers or panic handlers are detected. |
+| `rust.has_crate("name")` | True if the binary statically links the specified crate (e.g. `reqwest`, `tokio`). |
+| `rust.rustc_commit` | Git commit hash of the compiling rustc toolchain. |
 
 ### Disassembly Module (`disasm`)
 
 | Function | Description |
 | :--- | :--- |
-| `disasm.in_basic_block("push", "call")` | Checks if instructions co-occur within a single basic block. |
-| `disasm.in_function("push", "mov", "ret")` | Checks if instructions occur within a single function boundary. |
+| `disasm.in_basic_block(seq...)` | Checks if instructions co-occur within a single basic block. |
+| `disasm.in_function(seq...)` | Checks if instructions occur within a single function boundary. |
 | `disasm.has_instruction("syscall")` | Checks if the instruction mnemonic is present in code. |
-| `disasm.has_instruction_sequence("xor", "mov", "call")` | Checks for consecutive opcode sequence. |
+| `disasm.has_instruction_sequence(seq...)` | Checks for consecutive opcode sequence. |
 
 ### ELF Module (`elf`)
 
@@ -140,7 +185,20 @@ Raya supports full boolean logic:
 | `elf.is_64` | True if ELF is 64-bit (`elf.is_32` for 32-bit). |
 | `elf.entry_point` | Virtual address of the entry point. |
 | `elf.number_of_sections` | Total section header count. |
-| `elf.has_section(".text")` | True if section exists. |
+| `elf.has_section(".name")` | True if section exists. |
+| `elf.has_nx` | True if the stack segment has no execute permission. |
+| `elf.import("symbol")` | True if dynamic symbol is imported. |
+
+### Mach-O Module (`macho`)
+
+| Function / Property | Description |
+| :--- | :--- |
+| `macho.is_macho` | True if file is a Mach-O binary. |
+| `macho.is_fat` | True if binary is a Universal / FAT multi-architecture binary. |
+| `macho.cpu_type` | CPU architecture type (e.g. x86_64, ARM64). |
+| `macho.number_of_commands` | Number of load commands. |
+| `macho.number_of_segments` | Number of segments. |
+| `macho.section(seg, sec).entropy` | Entropy of the specified Mach-O section. |
 
 ### Entropy Module (`entropy`)
 

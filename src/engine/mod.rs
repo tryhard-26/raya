@@ -273,6 +273,26 @@ impl Engine {
                             required,
                             indicators.join(",")
                         ),
+                        MatchedEvidence::StackString { value, offset, .. } => {
+                            format!("stack_str:\"{}\"@0x{:x}", value, offset)
+                        }
+                        MatchedEvidence::CryptoConstant {
+                            algorithm, offset, ..
+                        } => {
+                            format!("crypto:{}:0x{:x}", algorithm, offset)
+                        }
+                        MatchedEvidence::DotNetIndicator { indicator } => {
+                            format!("dotnet:{}", indicator)
+                        }
+                        MatchedEvidence::GoIndicator { indicator } => {
+                            format!("go:{}", indicator)
+                        }
+                        MatchedEvidence::RustIndicator { indicator } => {
+                            format!("rust:{}", indicator)
+                        }
+                        MatchedEvidence::RichAnomaly { detail } => {
+                            format!("rich_anomaly:{}", detail)
+                        }
                         MatchedEvidence::Custom(msg) => msg.clone(),
                     })
                     .collect();
@@ -438,5 +458,66 @@ mod tests {
         let res = loaded_engine.scan_bytes(payload, "sample.bin");
         assert!(res.has_matches());
         assert_eq!(res.matches[0].rule, "cache_test");
+    }
+
+    #[test]
+    fn test_crypto_engine_evaluation() {
+        let rule_source = r#"
+            rule detect_aes {
+                meta:
+                    severity = "medium"
+                condition:
+                    crypto.has_aes and crypto.has_any
+            }
+        "#;
+
+        let rules = parse_rules_from_str(rule_source).unwrap();
+        let engine = Engine::compile_rules(rules).unwrap();
+
+        // Sample with AES S-box prefix
+        let mut payload = vec![0u8; 128];
+        const AES_SBOX: [u8; 16] = [
+            0x63, 0x7c, 0x77, 0x7b, 0xf2, 0x6b, 0x6f, 0xc5, 0x30, 0x01, 0x67, 0x2b, 0xfe, 0xd7,
+            0xab, 0x76,
+        ];
+        payload[20..36].copy_from_slice(&AES_SBOX);
+
+        let res = engine.scan_bytes(&payload, "crypto_sample.bin");
+        assert!(res.has_matches());
+        assert_eq!(res.matches[0].rule, "detect_aes");
+    }
+
+    #[test]
+    fn test_go_and_rust_engine_evaluation() {
+        let rule_source = r#"
+            rule detect_go_sample {
+                condition:
+                    go.is_go and go.has_package("main")
+            }
+            rule detect_rust_sample {
+                condition:
+                    rust.is_rust and rust.has_crate("tokio")
+            }
+        "#;
+
+        let rules = parse_rules_from_str(rule_source).unwrap();
+        let engine = Engine::compile_rules(rules).unwrap();
+
+        let mut go_payload = vec![0u8; 256];
+        go_payload[0..6].copy_from_slice(&[0xf0, 0xff, 0xff, 0xff, 0x00, 0x00]);
+        go_payload[50..58].copy_from_slice(b"go1.21.0");
+        go_payload[100..109].copy_from_slice(b"main.init");
+
+        let go_res = engine.scan_bytes(&go_payload, "go_app.bin");
+        assert!(go_res.has_matches());
+        assert_eq!(go_res.matches[0].rule, "detect_go_sample");
+
+        let mut rust_payload = vec![0u8; 256];
+        rust_payload[10..31].copy_from_slice(b"Option::unwrap()` on ");
+        rust_payload[50..57].copy_from_slice(b"tokio::");
+
+        let rust_res = engine.scan_bytes(&rust_payload, "rust_app.bin");
+        assert!(rust_res.has_matches());
+        assert_eq!(rust_res.matches[0].rule, "detect_rust_sample");
     }
 }

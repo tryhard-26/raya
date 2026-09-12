@@ -1,0 +1,11 @@
+rule pe_rich_header_anomaly : windows generic {
+    meta:
+        author = "Raya Research Team"
+        description = "Detects PE files with forged, manipulated, or inconsistent Microsoft Rich headers"
+        severity = "medium"
+        technique = "T1027"
+        reference = "https://attack.mitre.org/techniques/T1027/"
+
+    condition:
+        pe.is_pe and pe.has_rich_header and pe.rich_checksum_mismatch
+}

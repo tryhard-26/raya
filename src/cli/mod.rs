@@ -1,6 +1,8 @@
 pub mod bench;
 pub mod check;
 pub mod compile;
+pub mod convert;
+pub mod inspect;
 pub mod process;
 pub mod scan;
 pub mod test;
@@ -64,6 +66,28 @@ pub enum Commands {
         /// Optional decryption password for password-protected archives (defaults: infected, malware, etc.)
         #[arg(long, value_name = "PASSWORD")]
         password: Option<String>,
+    },
+
+    /// Deep forensic triage and structural binary inspection dashboard
+    Inspect {
+        /// Target binary file to inspect
+        #[arg(value_name = "TARGET")]
+        target: PathBuf,
+
+        /// Output results in JSON format
+        #[arg(long)]
+        json: bool,
+    },
+
+    /// Transpile legacy YARA rules (.yar / .yara) into native Raya detection rules
+    Convert {
+        /// Input YARA rule file
+        #[arg(value_name = "INPUT")]
+        input: PathBuf,
+
+        /// Output Raya rule file path
+        #[arg(short, long, value_name = "OUTPUT")]
+        output: PathBuf,
     },
 
     /// Pre-compile rules into a high-performance binary cache (.rc)
@@ -143,6 +167,12 @@ pub fn run_cli() -> i32 {
         }),
         Commands::Compile { rules, output } => {
             compile::run_compile(compile::CompileArgs { rules, output })
+        }
+        Commands::Inspect { target, json } => {
+            inspect::run_inspect(inspect::InspectArgs { target, json })
+        }
+        Commands::Convert { input, output } => {
+            convert::run_convert(convert::ConvertArgs { input, output })
         }
         Commands::Check { path, verbose } => check::run_check(check::CheckArgs { path, verbose }),
         Commands::Test { spec, json } => test::run_test(test::TestArgs { spec, json }),

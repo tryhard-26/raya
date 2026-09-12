@@ -189,6 +189,10 @@ impl<'a, 'b> Evaluator<'a, 'b> {
                 "is_pe" => EvalValue::Bool(self.context.binary.pe.is_some()),
                 "is_elf" => EvalValue::Bool(self.context.binary.elf.is_some()),
                 "is_macho" => EvalValue::Bool(self.context.binary.macho.is_some()),
+                "is_dotnet" => EvalValue::Bool(self.context.binary.dotnet.is_some()),
+                "is_go" => EvalValue::Bool(self.context.binary.golang.is_some()),
+                "is_rust" => EvalValue::Bool(self.context.binary.rust.is_some()),
+                "has_crypto" => EvalValue::Bool(self.context.binary.crypto.has_any()),
                 _ => EvalValue::None,
             },
         }
@@ -504,14 +508,48 @@ impl<'a, 'b> Evaluator<'a, 'b> {
                             return EvalValue::Bool(matches);
                         }
                     }
-                    "has_rich_comp_id" => {
+                    "has_rich_comp_id" | "rich_comp_id" => {
                         if let Some(EvalValue::Int(id)) = evaluated_args.first() {
-                            return EvalValue::Bool(pe.has_rich_comp_id(*id as u16));
+                            let matched = pe.has_rich_comp_id(*id as u16);
+                            if matched {
+                                self.context
+                                    .record_evidence(MatchedEvidence::Custom(format!(
+                                        "PE Rich Header CompID 0x{:04X} present",
+                                        id
+                                    )));
+                            }
+                            return EvalValue::Bool(matched);
                         }
                     }
-                    "has_rich_product_id" => {
+                    "has_rich_product_id" | "rich_product_id" => {
                         if let Some(EvalValue::Int(id)) = evaluated_args.first() {
-                            return EvalValue::Bool(pe.has_rich_product_id(*id as u16));
+                            let matched = pe.has_rich_product_id(*id as u16);
+                            if matched {
+                                self.context
+                                    .record_evidence(MatchedEvidence::Custom(format!(
+                                        "PE Rich Header ProductID 0x{:04X} present",
+                                        id
+                                    )));
+                            }
+                            return EvalValue::Bool(matched);
+                        }
+                    }
+                    "has_stack_string" | "stack_string" => {
+                        if let Some(EvalValue::Str(target)) = evaluated_args.first() {
+                            let lower = target.to_ascii_lowercase();
+                            if let Some(hit) = pe
+                                .stack_strings
+                                .iter()
+                                .find(|s| s.value.to_ascii_lowercase().contains(&lower))
+                            {
+                                self.context.record_evidence(MatchedEvidence::StackString {
+                                    value: hit.value.clone(),
+                                    offset: hit.offset,
+                                    is_wide: hit.is_wide,
+                                });
+                                return EvalValue::Bool(true);
+                            }
+                            return EvalValue::Bool(false);
                         }
                     }
                     "has_section" => {
@@ -658,6 +696,126 @@ impl<'a, 'b> Evaluator<'a, 'b> {
                         }
                     }
                     _ => {}
+                }
+            }
+        }
+
+        if module == "dotnet" || module.is_empty() {
+            if let Some(dotnet) = &self.context.binary.dotnet {
+                match function {
+                    "has_user_string" | "user_string" => {
+                        if let Some(EvalValue::Str(target)) = evaluated_args.first() {
+                            let matched = dotnet.user_string_contains(target);
+                            if matched {
+                                self.context
+                                    .record_evidence(MatchedEvidence::DotNetIndicator {
+                                        indicator: format!(
+                                            "User string (#US) contains \"{}\"",
+                                            target
+                                        ),
+                                    });
+                            }
+                            return EvalValue::Bool(matched);
+                        }
+                    }
+                    "has_type" => {
+                        if let Some(EvalValue::Str(target)) = evaluated_args.first() {
+                            let matched = dotnet.has_type(target);
+                            if matched {
+                                self.context
+                                    .record_evidence(MatchedEvidence::DotNetIndicator {
+                                        indicator: format!("Type \"{}\" defined", target),
+                                    });
+                            }
+                            return EvalValue::Bool(matched);
+                        }
+                    }
+                    "has_method" => {
+                        if let Some(EvalValue::Str(target)) = evaluated_args.first() {
+                            let matched = dotnet.has_method(target);
+                            if matched {
+                                self.context
+                                    .record_evidence(MatchedEvidence::DotNetIndicator {
+                                        indicator: format!("Method \"{}\" referenced", target),
+                                    });
+                            }
+                            return EvalValue::Bool(matched);
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        }
+
+        if module == "crypto" || module.is_empty() {
+            match function {
+                "has" | "has_algorithm" => {
+                    if let Some(EvalValue::Str(algo)) = evaluated_args.first() {
+                        let lower = algo.to_ascii_lowercase();
+                        if let Some(m) = self
+                            .context
+                            .binary
+                            .crypto
+                            .matches
+                            .iter()
+                            .find(|m| m.algorithm.to_ascii_lowercase() == lower)
+                        {
+                            self.context
+                                .record_evidence(MatchedEvidence::CryptoConstant {
+                                    algorithm: m.algorithm.clone(),
+                                    description: m.description.clone(),
+                                    offset: m.offset,
+                                });
+                            return EvalValue::Bool(true);
+                        }
+                        return EvalValue::Bool(false);
+                    }
+                }
+                _ => {}
+            }
+        }
+
+        if module == "go" || module.is_empty() {
+            if let Some(go) = &self.context.binary.golang {
+                match function {
+                    "has_function" => {
+                        if let Some(EvalValue::Str(func)) = evaluated_args.first() {
+                            let matched = go.has_function(func);
+                            if matched {
+                                self.context.record_evidence(MatchedEvidence::GoIndicator {
+                                    indicator: format!("Function \"{}\"", func),
+                                });
+                            }
+                            return EvalValue::Bool(matched);
+                        }
+                    }
+                    "has_package" => {
+                        if let Some(EvalValue::Str(pkg)) = evaluated_args.first() {
+                            let matched = go.has_package(pkg);
+                            if matched {
+                                self.context.record_evidence(MatchedEvidence::GoIndicator {
+                                    indicator: format!("Package \"{}\"", pkg),
+                                });
+                            }
+                            return EvalValue::Bool(matched);
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        }
+
+        if (module == "rust" || module.is_empty()) && function == "has_crate" {
+            if let Some(rust) = &self.context.binary.rust {
+                if let Some(EvalValue::Str(crate_name)) = evaluated_args.first() {
+                    let matched = rust.has_crate(crate_name);
+                    if matched {
+                        self.context
+                            .record_evidence(MatchedEvidence::RustIndicator {
+                                indicator: format!("Linked crate \"{}\"", crate_name),
+                            });
+                    }
+                    return EvalValue::Bool(matched);
                 }
             }
         }
@@ -991,6 +1149,85 @@ impl<'a, 'b> Evaluator<'a, 'b> {
                                         EvalValue::None
                                     }
                                 }
+                                "rich_checksum_mismatch" => {
+                                    EvalValue::Bool(pe.rich_checksum_mismatch)
+                                }
+                                "is_rich_checksum_valid" => {
+                                    EvalValue::Bool(pe.is_rich_checksum_valid.unwrap_or(false))
+                                }
+                                "has_dotnet" => EvalValue::Bool(pe.has_dotnet()),
+                                "stack_strings_count" => {
+                                    EvalValue::Int(pe.stack_strings.len() as i64)
+                                }
+                                _ => EvalValue::None,
+                            };
+                        } else {
+                            return EvalValue::Bool(false);
+                        }
+                    } else if var_name == "dotnet" {
+                        if let Some(dotnet) = &self.context.binary.dotnet {
+                            return match property {
+                                "is_dotnet" => EvalValue::Bool(dotnet.is_dotnet),
+                                "version" | "clr_version" => {
+                                    EvalValue::Str(dotnet.clr_version.clone())
+                                }
+                                "assembly_name" => dotnet
+                                    .assembly_name
+                                    .clone()
+                                    .map(EvalValue::Str)
+                                    .unwrap_or(EvalValue::None),
+                                "module_name" => dotnet
+                                    .module_name
+                                    .clone()
+                                    .map(EvalValue::Str)
+                                    .unwrap_or(EvalValue::None),
+                                "user_strings_count" => {
+                                    EvalValue::Int(dotnet.user_strings.len() as i64)
+                                }
+                                _ => EvalValue::None,
+                            };
+                        } else {
+                            return EvalValue::Bool(false);
+                        }
+                    } else if var_name == "crypto" {
+                        let c = &self.context.binary.crypto;
+                        return match property {
+                            "has_any" => EvalValue::Bool(c.has_any()),
+                            "has_aes" => EvalValue::Bool(c.has_aes),
+                            "has_chacha20" => EvalValue::Bool(c.has_chacha20),
+                            "has_md5" => EvalValue::Bool(c.has_md5),
+                            "has_sha256" => EvalValue::Bool(c.has_sha256),
+                            "has_crc32" => EvalValue::Bool(c.has_crc32),
+                            "has_sm4" => EvalValue::Bool(c.has_sm4),
+                            "matches_count" => EvalValue::Int(c.matches.len() as i64),
+                            _ => EvalValue::None,
+                        };
+                    } else if var_name == "go" {
+                        if let Some(go) = &self.context.binary.golang {
+                            return match property {
+                                "is_go" => EvalValue::Bool(go.is_go),
+                                "version" => go
+                                    .version
+                                    .clone()
+                                    .map(EvalValue::Str)
+                                    .unwrap_or(EvalValue::None),
+                                "packages_count" => EvalValue::Int(go.packages.len() as i64),
+                                "functions_count" => EvalValue::Int(go.functions.len() as i64),
+                                _ => EvalValue::None,
+                            };
+                        } else {
+                            return EvalValue::Bool(false);
+                        }
+                    } else if var_name == "rust" {
+                        if let Some(rust) = &self.context.binary.rust {
+                            return match property {
+                                "is_rust" => EvalValue::Bool(rust.is_rust),
+                                "commit" | "rustc_commit" => rust
+                                    .rustc_commit
+                                    .clone()
+                                    .map(EvalValue::Str)
+                                    .unwrap_or(EvalValue::None),
+                                "crates_count" => EvalValue::Int(rust.crates.len() as i64),
                                 _ => EvalValue::None,
                             };
                         } else {

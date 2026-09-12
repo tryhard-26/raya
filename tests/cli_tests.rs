@@ -101,3 +101,79 @@ fn test_cli_test_suite_runner() {
     assert!(stdout.contains("False Positives: 0"));
     assert!(stdout.contains("False Negatives: 0"));
 }
+
+#[test]
+fn test_cli_inspect() {
+    let output = Command::new(get_bin_path())
+        .args(["inspect", "tests/fixtures/wannacry_sample.exe"])
+        .output()
+        .expect("Failed to execute raya inspect");
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("RAYA BINARY INSPECTOR"));
+    assert!(stdout.contains("FILE METRICS:"));
+    assert!(stdout.contains("CRYPTOGRAPHIC IDENTIFIERS:"));
+    assert!(stdout.contains("SECTION TABLE & ENTROPY BAR:"));
+}
+
+#[test]
+fn test_cli_inspect_json() {
+    let output = Command::new(get_bin_path())
+        .args(["inspect", "tests/fixtures/wannacry_sample.exe", "--json"])
+        .output()
+        .expect("Failed to execute raya inspect --json");
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let parsed: serde_json::Value =
+        serde_json::from_str(&stdout).expect("Inspect output should be valid JSON");
+    assert_eq!(parsed["format"], "PE32");
+    assert_eq!(parsed["filesize"], 2560);
+    assert!(parsed["hashes"]["sha256"].is_string());
+}
+
+#[test]
+fn test_cli_convert() {
+    let temp_dir = std::env::temp_dir();
+    let yar_path = temp_dir.join("test_convert_input.yar");
+    let raya_path = temp_dir.join("test_convert_output.raya");
+
+    let sample_yara = r#"
+import "pe"
+
+rule Test_Transpiled_Yara_Rule {
+    meta:
+        description = "Test conversion rule"
+    strings:
+        $s1 = "malicious_payload" ascii wide
+    condition:
+        $s1 and pe.number_of_sections > 0
+}
+"#;
+    std::fs::write(&yar_path, sample_yara).unwrap();
+
+    let output = Command::new(get_bin_path())
+        .args([
+            "convert",
+            yar_path.to_str().unwrap(),
+            "-o",
+            raya_path.to_str().unwrap(),
+        ])
+        .output()
+        .expect("Failed to execute raya convert");
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("SUCCESS: Successfully transpiled 1 rule(s)"));
+
+    // Check that raya can validate the converted rule
+    let check_output = Command::new(get_bin_path())
+        .args(["check", raya_path.to_str().unwrap()])
+        .output()
+        .expect("Failed to execute raya check");
+    assert!(check_output.status.success());
+
+    let _ = std::fs::remove_file(yar_path);
+    let _ = std::fs::remove_file(raya_path);
+}

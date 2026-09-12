@@ -120,6 +120,26 @@ pub enum MatchedEvidence {
         /// Virtual address of the function entry point.
         address: u64,
     },
+    /// Stack string dynamically assembled on the stack.
+    StackString {
+        value: String,
+        offset: u64,
+        is_wide: bool,
+    },
+    /// Detected cryptographic constant or S-box signature.
+    CryptoConstant {
+        algorithm: String,
+        description: String,
+        offset: usize,
+    },
+    /// Detected .NET / CLR indicator (assembly name, user string, type).
+    DotNetIndicator { indicator: String },
+    /// Detected Golang runtime indicator (version, package, symbol).
+    GoIndicator { indicator: String },
+    /// Detected Rust runtime indicator (rustc commit, crate).
+    RustIndicator { indicator: String },
+    /// Forensic anomaly in Microsoft PE Rich header (e.g. checksum mismatch).
+    RichAnomaly { detail: String },
     /// Custom analyst or rule notification string.
     Custom(String),
 }
@@ -229,6 +249,40 @@ impl MatchedEvidence {
                     address,
                     mnemonics.join(" -> ")
                 )
+            }
+            MatchedEvidence::StackString {
+                value,
+                offset,
+                is_wide,
+            } => {
+                format!(
+                    "Deobfuscated stack string: \"{}\" at VA 0x{:x}{}",
+                    value,
+                    offset,
+                    if *is_wide { " (UTF-16LE)" } else { "" }
+                )
+            }
+            MatchedEvidence::CryptoConstant {
+                algorithm,
+                description,
+                offset,
+            } => {
+                format!(
+                    "Cryptographic signature [{}]: {} at offset 0x{:x}",
+                    algorithm, description, offset
+                )
+            }
+            MatchedEvidence::DotNetIndicator { indicator } => {
+                format!(".NET CLR indicator: {}", indicator)
+            }
+            MatchedEvidence::GoIndicator { indicator } => {
+                format!("Golang indicator: {}", indicator)
+            }
+            MatchedEvidence::RustIndicator { indicator } => {
+                format!("Rust indicator: {}", indicator)
+            }
+            MatchedEvidence::RichAnomaly { detail } => {
+                format!("Rich Header anomaly: {}", detail)
             }
             MatchedEvidence::Custom(msg) => msg.clone(),
         }

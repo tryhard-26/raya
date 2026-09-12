@@ -1,4 +1,5 @@
-use iced_x86::{Decoder, DecoderOptions, FlowControl, OpKind};
+use iced_x86::{Decoder, DecoderOptions, FlowControl, Mnemonic, OpKind, Register};
+use std::collections::BTreeMap;
 
 /// Represents a disassembled basic block of straight-line instructions.
 #[derive(Debug, Clone, PartialEq)]
@@ -28,6 +29,14 @@ pub struct ApiCallArgMatch {
     pub value: u64,
     pub constant_name: String,
     pub call_ip: u64,
+}
+
+/// Represents an extracted stack-constructed string.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct StackString {
+    pub value: String,
+    pub offset: u64,
+    pub is_wide: bool,
 }
 
 /// Resolves standard Windows / native security API argument constants based on the target API.
@@ -347,6 +356,207 @@ pub fn has_mnemonic(code: &[u8], bitness: u32, target: &str) -> bool {
     false
 }
 
+fn is_stack_register(reg: Register) -> bool {
+    matches!(
+        reg,
+        Register::ESP | Register::EBP | Register::RSP | Register::RBP
+    )
+}
+
+/// Automatically extracts stack-constructed strings from machine code instructions.
+///
+/// Malware frequently obfuscates static strings by building them dynamically on the stack
+/// using sequential byte/word/dword immediate stores (`mov [ebp-X], 'c'`, `mov [esp+Y], 0x...`).
+/// This function decodes linear instruction streams, tracks memory writes against stack base
+/// registers (EBP/ESP/RBP/RSP), and reconstructs contiguous ASCII and UTF-16LE strings.
+pub fn extract_stack_strings(code: &[u8], bitness: u32, base_ip: u64) -> Vec<StackString> {
+    if code.is_empty() {
+        return Vec::new();
+    }
+
+    let mut decoder = Decoder::with_ip(bitness, code, base_ip, DecoderOptions::NONE);
+    let mut results = Vec::new();
+
+    let mut stack_writes: BTreeMap<i64, (u8, u64)> = BTreeMap::new();
+
+    while decoder.can_decode() {
+        let instr = decoder.decode();
+
+        let is_mov = instr.mnemonic() == Mnemonic::Mov;
+        let is_stack_mem_dst = instr.op_count() >= 2
+            && instr.op_kind(0) == OpKind::Memory
+            && is_stack_register(instr.memory_base())
+            && instr.memory_index() == Register::None;
+
+        if is_mov && is_stack_mem_dst {
+            let base_disp = if bitness == 32 {
+                (instr.memory_displacement64() as u32 as i32) as i64
+            } else {
+                instr.memory_displacement64() as i64
+            };
+            let ip = instr.ip();
+
+            let bytes: Option<Vec<u8>> = match instr.op_kind(1) {
+                OpKind::Immediate8 => Some(vec![instr.immediate8()]),
+                OpKind::Immediate16 => Some(instr.immediate16().to_le_bytes().to_vec()),
+                OpKind::Immediate32 => Some(instr.immediate32().to_le_bytes().to_vec()),
+                OpKind::Immediate64 => Some(instr.immediate64().to_le_bytes().to_vec()),
+                OpKind::Immediate8to16 => {
+                    Some((instr.immediate8to16() as u16).to_le_bytes().to_vec())
+                }
+                OpKind::Immediate8to32 => {
+                    Some((instr.immediate8to32() as u32).to_le_bytes().to_vec())
+                }
+                OpKind::Immediate8to64 => {
+                    Some((instr.immediate8to64() as u64).to_le_bytes().to_vec())
+                }
+                OpKind::Immediate32to64 => {
+                    Some((instr.immediate32to64() as u64).to_le_bytes().to_vec())
+                }
+                _ => None,
+            };
+
+            if let Some(bytes) = bytes {
+                for (offset_idx, &b) in bytes.iter().enumerate() {
+                    stack_writes.insert(base_disp + offset_idx as i64, (b, ip));
+                }
+            }
+        }
+
+        let flow = instr.flow_control();
+        let is_branch = matches!(
+            flow,
+            FlowControl::UnconditionalBranch
+                | FlowControl::ConditionalBranch
+                | FlowControl::Return
+                | FlowControl::IndirectBranch
+                | FlowControl::Interrupt
+        );
+
+        if is_branch && !stack_writes.is_empty() {
+            extract_strings_from_map(&stack_writes, &mut results);
+            stack_writes.clear();
+        }
+    }
+
+    if !stack_writes.is_empty() {
+        extract_strings_from_map(&stack_writes, &mut results);
+    }
+
+    let mut deduped = Vec::new();
+    let mut seen = std::collections::HashSet::new();
+    for s in results {
+        if seen.insert(s.value.clone()) {
+            deduped.push(s);
+        }
+    }
+
+    deduped
+}
+
+fn extract_strings_from_map(map: &BTreeMap<i64, (u8, u64)>, results: &mut Vec<StackString>) {
+    if map.is_empty() {
+        return;
+    }
+
+    let mut current_run: Vec<(i64, u8, u64)> = Vec::new();
+
+    for (&disp, &(byte, ip)) in map {
+        if let Some(&(prev_disp, _, _)) = current_run.last() {
+            if disp != prev_disp + 1 {
+                process_buffer(&current_run, results);
+                current_run.clear();
+            }
+        }
+        current_run.push((disp, byte, ip));
+    }
+
+    if !current_run.is_empty() {
+        process_buffer(&current_run, results);
+    }
+}
+
+fn process_buffer(run: &[(i64, u8, u64)], results: &mut Vec<StackString>) {
+    if run.len() < 4 {
+        return;
+    }
+
+    let bytes: Vec<u8> = run.iter().map(|&(_, b, _)| b).collect();
+
+    // 1. ASCII extraction
+    let mut ascii_start = None;
+    for (i, &b) in bytes.iter().enumerate() {
+        let is_printable = (0x20..=0x7E).contains(&b) || b == b'\t' || b == b'\r' || b == b'\n';
+        if is_printable {
+            if ascii_start.is_none() {
+                ascii_start = Some(i);
+            }
+        } else if let Some(start) = ascii_start {
+            let slice = &bytes[start..i];
+            if slice.len() >= 4 {
+                if let Ok(s) = std::str::from_utf8(slice) {
+                    results.push(StackString {
+                        value: s.to_string(),
+                        offset: run[start].2,
+                        is_wide: false,
+                    });
+                }
+            }
+            ascii_start = None;
+        }
+    }
+    if let Some(start) = ascii_start {
+        let slice = &bytes[start..];
+        if slice.len() >= 4 {
+            if let Ok(s) = std::str::from_utf8(slice) {
+                results.push(StackString {
+                    value: s.to_string(),
+                    offset: run[start].2,
+                    is_wide: false,
+                });
+            }
+        }
+    }
+
+    // 2. UTF-16LE extraction
+    if bytes.len() >= 8 {
+        let mut u16_chars = Vec::new();
+        let mut u16_start = None;
+        for i in (0..bytes.len().saturating_sub(1)).step_by(2) {
+            let b0 = bytes[i];
+            let b1 = bytes[i + 1];
+            if b1 == 0 && ((0x20..=0x7E).contains(&b0) || b0 == b'\t' || b0 == b'\r' || b0 == b'\n')
+            {
+                if u16_start.is_none() {
+                    u16_start = Some(i);
+                }
+                u16_chars.push(b0 as char);
+            } else {
+                if u16_chars.len() >= 4 {
+                    let s: String = u16_chars.iter().collect();
+                    let start_idx = u16_start.unwrap_or(0);
+                    results.push(StackString {
+                        value: s,
+                        offset: run[start_idx].2,
+                        is_wide: true,
+                    });
+                }
+                u16_chars.clear();
+                u16_start = None;
+            }
+        }
+        if u16_chars.len() >= 4 {
+            let s: String = u16_chars.iter().collect();
+            let start_idx = u16_start.unwrap_or(0);
+            results.push(StackString {
+                value: s,
+                offset: run[start_idx].2,
+                is_wide: true,
+            });
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -408,5 +618,50 @@ mod tests {
         assert_eq!(hit.value, 0x40);
         assert_eq!(hit.constant_name, "PAGE_EXECUTE_READWRITE");
         assert_eq!(hit.argument_name, "flProtect");
+    }
+
+    #[test]
+    fn test_stack_string_extraction() {
+        // x86 32-bit:
+        // mov byte ptr [ebp-4], 'c' (0x63)
+        // mov byte ptr [ebp-3], 'm' (0x6D)
+        // mov byte ptr [ebp-2], 'd' (0x64)
+        // mov byte ptr [ebp-1], '.' (0x2E)
+        // mov byte ptr [ebp+0], 'e' (0x65)
+        // mov byte ptr [ebp+1], 'x' (0x78)
+        // mov byte ptr [ebp+2], 'e' (0x65)
+        // mov byte ptr [ebp+3], 0x00
+        let code = [
+            0xC6, 0x45, 0xFC, 0x63, // mov byte ptr [ebp-4], 'c'
+            0xC6, 0x45, 0xFD, 0x6D, // mov byte ptr [ebp-3], 'm'
+            0xC6, 0x45, 0xFE, 0x64, // mov byte ptr [ebp-2], 'd'
+            0xC6, 0x45, 0xFF, 0x2E, // mov byte ptr [ebp-1], '.'
+            0xC6, 0x45, 0x00, 0x65, // mov byte ptr [ebp+0], 'e'
+            0xC6, 0x45, 0x01, 0x78, // mov byte ptr [ebp+1], 'x'
+            0xC6, 0x45, 0x02, 0x65, // mov byte ptr [ebp+2], 'e'
+            0xC6, 0x45, 0x03, 0x00, // mov byte ptr [ebp+3], 0
+        ];
+
+        let stack_strings = extract_stack_strings(&code, 32, 0x401000);
+        assert_eq!(stack_strings.len(), 1);
+        assert_eq!(stack_strings[0].value, "cmd.exe");
+        assert!(!stack_strings[0].is_wide);
+    }
+
+    #[test]
+    fn test_stack_string_dword_64bit() {
+        // x86_64:
+        // mov dword ptr [rsp], 0x70747468 ("http")
+        // mov dword ptr [rsp+4], 0x002F2F3A ("://\0")
+        let code = [
+            0xC7, 0x04, 0x24, 0x68, 0x74, 0x74, 0x70, // mov dword ptr [rsp], 0x70747468
+            0xC7, 0x44, 0x24, 0x04, 0x3A, 0x2F, 0x2F,
+            0x00, // mov dword ptr [rsp+4], 0x002F2F3A
+        ];
+
+        let stack_strings = extract_stack_strings(&code, 64, 0x140001000);
+        assert_eq!(stack_strings.len(), 1);
+        assert_eq!(stack_strings[0].value, "http://");
+        assert!(!stack_strings[0].is_wide);
     }
 }

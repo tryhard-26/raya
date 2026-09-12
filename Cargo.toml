@@ -1,6 +1,6 @@
 [package]
 name = "raya"
-version = "0.2.0"
+version = "0.3.0"
 edition = "2021"
 authors = ["Raya Core Team"]
 description = "Rust-native malware detection and binary pattern-matching engine"

@@ -37,6 +37,13 @@
 //! - **Basic-Block Scoping & Argument Tracking**: Disassembles x86/x64 instruction streams with
 //!   [`iced-x86`](https://docs.rs/iced-x86), tracking static API call arguments (e.g.
 //!   `PAGE_EXECUTE_READWRITE` protection flags on allocation primitives) within basic blocks.
+//! - **Automated Stack String Deobfuscation**: Reconstructs hidden ASCII and UTF-16LE strings constructed
+//!   via sequential immediate memory writes to stack frames.
+//! - **Cryptographic Constant & S-Box Detection**: Multi-pattern scanner identifying AES, ChaCha20,
+//!   MD5, SHA-256, CRC32, and SM4 lookup tables and initialization vectors.
+//! - **Runtime Introspection**: Introspects .NET CLR metadata and `#US` user strings, Go `.gopclntab`
+//!   function symbols and versions, and Rust compiler commit hashes and linked crates.
+//! - **PE Rich Header Integrity Verification**: Checksum validation detecting header tampering and toolchain forgery.
 //! - **In-Memory Archive Inspection**: Extracts and recursively scans password-protected and
 //!   AES-encrypted ZIP/archive drops entirely in memory without writing decrypted payloads to disk.
 //! - **Zero-Empty-Evidence Guarantee**: Every detection records concrete evidence (exact file
