@@ -38,6 +38,8 @@ pub struct MachoInfo {
     pub is_signed: bool,
     pub segments: Vec<MachoSegment>,
     pub dylibs: Vec<String>,
+    pub entitlements: Vec<String>,
+    pub has_dangerous_entitlement: bool,
 }
 
 impl MachoInfo {
@@ -54,6 +56,8 @@ impl MachoInfo {
             is_signed: false,
             segments: Vec::new(),
             dylibs: Vec::new(),
+            entitlements: Vec::new(),
+            has_dangerous_entitlement: false,
         }
     }
 
@@ -80,6 +84,13 @@ impl MachoInfo {
             let dl = d.to_ascii_lowercase();
             dl == clean || dl.ends_with(&format!("/{}", clean)) || dl.contains(&clean)
         })
+    }
+
+    pub fn has_entitlement(&self, name: &str) -> bool {
+        let clean = name.to_ascii_lowercase();
+        self.entitlements
+            .iter()
+            .any(|e| e.to_ascii_lowercase().contains(&clean))
     }
 }
 
@@ -438,6 +449,56 @@ fn parse_single_macho(data: &[u8], is_64: bool, is_little_endian: bool) -> Optio
         cmd_offset += cmdsize;
     }
 
+    let mut entitlements = Vec::new();
+    for seg in &segments {
+        for sec in &seg.sections {
+            if sec.sectname.contains("entitlements") && sec.size > 0 {
+                let start = sec.offset as usize;
+                let end = (start + sec.size as usize).min(data.len());
+                if start < end {
+                    if let Ok(xml) = std::str::from_utf8(&data[start..end]) {
+                        for part in xml.split("<key>") {
+                            if let Some(idx) = part.find("</key>") {
+                                let key = part[..idx].trim().to_string();
+                                if !key.is_empty() && !entitlements.contains(&key) {
+                                    entitlements.push(key);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    if entitlements.is_empty() {
+        if let Some(plist_pos) = data.windows(6).position(|w| w == b"<plist") {
+            let end_pos = data[plist_pos..]
+                .windows(8)
+                .position(|w| w == b"</plist>")
+                .map(|p| plist_pos + p + 8)
+                .unwrap_or_else(|| (plist_pos + 4096).min(data.len()));
+            if let Ok(xml) = std::str::from_utf8(&data[plist_pos..end_pos]) {
+                for part in xml.split("<key>") {
+                    if let Some(idx) = part.find("</key>") {
+                        let key = part[..idx].trim().to_string();
+                        if !key.is_empty() && !entitlements.contains(&key) {
+                            entitlements.push(key);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    let has_dangerous_entitlement = entitlements.iter().any(|e| {
+        let l = e.to_ascii_lowercase();
+        l.contains("get-task-allow")
+            || l.contains("disable-library-validation")
+            || l.contains("allow-dyld-environment-variables")
+            || l.contains("allow-unsigned-executable-memory")
+    });
+
     Some(MachoInfo {
         is_macho: true,
         is_64,
@@ -450,6 +511,8 @@ fn parse_single_macho(data: &[u8], is_64: bool, is_little_endian: bool) -> Optio
         is_signed,
         segments,
         dylibs,
+        entitlements,
+        has_dangerous_entitlement,
     })
 }
 
@@ -488,5 +551,24 @@ mod tests {
         assert!(info.is_64);
         assert_eq!(info.segments.len(), 1);
         assert_eq!(info.segments[0].name, "__TEXT");
+    }
+
+    #[test]
+    fn test_mock_macho_entitlements() {
+        let mut buf = vec![0u8; 128];
+        buf[0..4].copy_from_slice(&0xFEEDFACFu32.to_ne_bytes());
+        buf[4..8].copy_from_slice(&0x01000007u32.to_ne_bytes());
+        buf[12..16].copy_from_slice(&2u32.to_ne_bytes());
+        buf[16..20].copy_from_slice(&0u32.to_ne_bytes());
+
+        let plist = b"<plist version=\"1.0\"><dict><key>com.apple.security.get-task-allow</key><true/><key>com.apple.security.cs.allow-jit</key><true/></dict></plist>";
+        buf.extend_from_slice(plist);
+
+        let info = parse_macho(&buf).expect("Should parse Mach-O with embedded plist");
+        assert!(info.is_macho);
+        assert_eq!(info.entitlements.len(), 2);
+        assert!(info.has_entitlement("get-task-allow"));
+        assert!(info.has_entitlement("allow-jit"));
+        assert!(info.has_dangerous_entitlement);
     }
 }

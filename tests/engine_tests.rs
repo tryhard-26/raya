@@ -97,3 +97,29 @@ fn test_string_counts_and_offsets() {
     assert!(engine.scan_bytes(valid_payload, "v1").has_matches());
     assert!(!engine.scan_bytes(invalid_offset, "v2").has_matches());
 }
+
+#[test]
+fn test_macho_entitlement_rules() {
+    let mut buf = vec![0u8; 128];
+    buf[0..4].copy_from_slice(&0xFEEDFACFu32.to_ne_bytes());
+    buf[4..8].copy_from_slice(&0x01000007u32.to_ne_bytes());
+    buf[12..16].copy_from_slice(&2u32.to_ne_bytes());
+    buf[16..20].copy_from_slice(&0u32.to_ne_bytes());
+
+    let plist = b"<plist version=\"1.0\"><dict><key>com.apple.security.get-task-allow</key><true/><key>com.apple.security.cs.allow-jit</key><true/></dict></plist>";
+    buf.extend_from_slice(plist);
+
+    let rule_src = r#"
+        rule Detect_Dangerous_Macho {
+            condition:
+                macho.is_macho and macho.has_dangerous_entitlement and macho.has_entitlement("get-task-allow")
+        }
+    "#;
+
+    let rules = parse_rules_from_str(rule_src).unwrap();
+    let engine = Engine::compile_rules(rules).unwrap();
+    let res = engine.scan_bytes(&buf, "target.dylib");
+
+    assert!(res.has_matches());
+    assert_eq!(res.matches[0].rule, "Detect_Dangerous_Macho");
+}

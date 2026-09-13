@@ -46,6 +46,7 @@ pub struct PeInfo {
     pub is_rich_checksum_valid: Option<bool>,
     pub is_signed: bool,
     pub security_dir_size: u32,
+    pub authenticode: Option<crate::binary::authenticode::AuthenticodeInfo>,
     pub imphash: Option<String>,
     pub rich_hash: Option<String>,
     pub has_tls: bool,
@@ -53,6 +54,9 @@ pub struct PeInfo {
     pub exphash: Option<String>,
     pub dotnet: Option<crate::binary::dotnet::DotNetInfo>,
     pub stack_strings: Vec<crate::binary::disasm::StackString>,
+    pub syscalls: Vec<crate::binary::syscall::SyscallStub>,
+    pub api_hashes: Vec<crate::binary::api_hash::ApiHashMatch>,
+    pub cfg: Option<crate::binary::cfg::ControlFlowGraph>,
 }
 
 impl PeInfo {
@@ -74,6 +78,7 @@ impl PeInfo {
             is_rich_checksum_valid: None,
             is_signed: false,
             security_dir_size: 0,
+            authenticode: None,
             imphash: None,
             rich_hash: None,
             has_tls: false,
@@ -81,6 +86,9 @@ impl PeInfo {
             exphash: None,
             dotnet: None,
             stack_strings: Vec::new(),
+            syscalls: Vec::new(),
+            api_hashes: Vec::new(),
+            cfg: None,
         }
     }
 
@@ -111,6 +119,39 @@ impl PeInfo {
         self.stack_strings
             .iter()
             .any(|s| s.value.to_ascii_lowercase().contains(&lower))
+    }
+
+    pub fn has_api_hash(&self, api: &str) -> bool {
+        let clean = api.to_ascii_lowercase();
+        self.api_hashes
+            .iter()
+            .any(|m| m.api_name.to_ascii_lowercase() == clean)
+    }
+
+    pub fn has_direct_syscall(&self) -> bool {
+        self.syscalls
+            .iter()
+            .any(|s| s.stub_type == crate::binary::syscall::SyscallType::Direct)
+    }
+
+    pub fn has_indirect_syscall(&self) -> bool {
+        self.syscalls
+            .iter()
+            .any(|s| s.stub_type == crate::binary::syscall::SyscallType::Indirect)
+    }
+
+    pub fn has_signature_overlay(&self) -> bool {
+        self.authenticode
+            .as_ref()
+            .map(|a| a.has_signature_overlay)
+            .unwrap_or(false)
+    }
+
+    pub fn is_self_signed(&self) -> bool {
+        self.authenticode
+            .as_ref()
+            .map(|a| a.is_self_signed)
+            .unwrap_or(false)
     }
 
     pub fn has_exphash(&self, target: &str) -> bool {
@@ -489,9 +530,21 @@ pub fn parse_pe(data: &[u8]) -> Option<PeInfo> {
             (0, 0)
         };
 
-    let is_signed = sec_dir_size > 0
-        && sec_dir_offset > 0
-        && (sec_dir_offset as usize + sec_dir_size as usize) <= data.len();
+    let authenticode = if sec_dir_offset > 0 && sec_dir_size > 0 {
+        crate::binary::authenticode::parse_authenticode(
+            data,
+            sec_dir_offset as usize,
+            sec_dir_size as usize,
+        )
+    } else {
+        None
+    };
+
+    let is_signed = authenticode.as_ref().map(|a| a.is_signed).unwrap_or(
+        sec_dir_size > 0
+            && sec_dir_offset > 0
+            && (sec_dir_offset as usize + sec_dir_size as usize) <= data.len(),
+    );
 
     // TLS Directory (Index 9 in Data Directories, each entry 8 bytes: RVA + size)
     let (tls_rva, tls_size) = if data_dirs_offset + 72 + 8 <= opt_offset + size_of_opt_header {
@@ -937,20 +990,52 @@ pub fn parse_pe(data: &[u8]) -> Option<PeInfo> {
         }
     }
 
-    // Extract stack strings from executable sections
+    // Extract stack strings, syscall stubs, API hashes, and CFG from executable sections
     let mut stack_strings = Vec::new();
+    let mut syscalls = Vec::new();
+    let mut api_hashes = Vec::new();
+    let mut primary_cfg = None;
+    let api_db = crate::binary::api_hash::ApiHashDatabase::new();
+
     for sec in &sections {
         if sec.is_executable && sec.raw_size > 0 && (sec.raw_offset as usize) < data.len() {
             let start = sec.raw_offset as usize;
-            let end = (start + (sec.raw_size as usize).min(256 * 1024)).min(data.len());
+            let end = (start + (sec.raw_size as usize).min(512 * 1024)).min(data.len());
             let sec_bytes = &data[start..end];
             let bitness = if is_pe32_plus { 64 } else { 32 };
-            let strings = crate::binary::disasm::extract_stack_strings(
-                sec_bytes,
-                bitness,
-                image_base + sec.virtual_address as u64,
-            );
+            let sec_va = image_base + sec.virtual_address as u64;
+
+            let strings = crate::binary::disasm::extract_stack_strings(sec_bytes, bitness, sec_va);
             stack_strings.extend(strings);
+
+            // Decode instructions for CFG, syscalls, and API hash scanning
+            let mut decoder = iced_x86::Decoder::with_ip(
+                bitness,
+                sec_bytes,
+                sec_va,
+                iced_x86::DecoderOptions::NONE,
+            );
+            let mut instructions = Vec::new();
+            let mut instr = iced_x86::Instruction::default();
+            while decoder.can_decode() && instructions.len() < 32768 {
+                decoder.decode_out(&mut instr);
+                if !instr.is_invalid() {
+                    instructions.push(instr);
+                }
+            }
+
+            let sec_syscalls = crate::binary::syscall::detect_syscall_stubs(&instructions);
+            syscalls.extend(sec_syscalls);
+
+            let sec_hashes =
+                crate::binary::api_hash::scan_api_hashes(sec_bytes, &instructions, &api_db);
+            api_hashes.extend(sec_hashes);
+
+            if primary_cfg.is_none() && !instructions.is_empty() {
+                primary_cfg = Some(crate::binary::cfg::ControlFlowGraph::from_instructions(
+                    &instructions,
+                ));
+            }
         }
     }
 
@@ -971,6 +1056,7 @@ pub fn parse_pe(data: &[u8]) -> Option<PeInfo> {
         is_rich_checksum_valid,
         is_signed,
         security_dir_size: sec_dir_size,
+        authenticode,
         imphash,
         rich_hash,
         has_tls,
@@ -978,6 +1064,9 @@ pub fn parse_pe(data: &[u8]) -> Option<PeInfo> {
         exphash,
         dotnet,
         stack_strings,
+        syscalls,
+        api_hashes,
+        cfg: primary_cfg,
     })
 }
 

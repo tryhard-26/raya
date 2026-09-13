@@ -1,0 +1,11 @@
+rule kernel_syscall_evasion : windows evasion {
+    meta:
+        author = "Raya Research Team"
+        description = "Detects userland direct or indirect syscall execution stubs bypassing API hooks"
+        severity = "critical"
+        technique = "T1562.001"
+        reference = "https://attack.mitre.org/techniques/T1562/001/"
+
+    condition:
+        pe.is_pe and (pe.has_direct_syscall or pe.has_indirect_syscall)
+}

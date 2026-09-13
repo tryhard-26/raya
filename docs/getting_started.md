@@ -78,8 +78,8 @@ MATCHES (1 rule(s) triggered):
   Description: Detects WannaCry ransomware artifacts, command execution strings, and drop mechanisms
   ATT&CK:      T1486
   Evidence:
-    ✓ Pattern $tasksche (1 hit(s) at [0xf4d8])
-    ✓ Pattern $icacls (1 hit(s) at [0xf4fc])
+    [+] Pattern $tasksche (1 hit(s) at [0xf4d8])
+    [+] Pattern $icacls (1 hit(s) at [0xf4fc])
   Verdict Reason: Condition satisfied with 2 evidence indicator(s)
 ```
 

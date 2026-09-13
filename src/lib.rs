@@ -28,8 +28,22 @@
 //!       [ Output Formats ] ─────► Terminal (Colored) / JSON / SARIF / STIX 2.1
 //! ```
 //!
-//! ## Key Capabilities
+//! ## Key Capabilities (Raya 2.0)
 //!
+//! - **Control Flow Graph (CFG) & Cyclomatic Complexity**: Builds basic-block directed graphs,
+//!   detects natural loops (back-edges via iterative dominator analysis), calculates cyclomatic
+//!   complexity ($M = E - V + 2P$), and flags Control Flow Flattening (CFF) state-machine dispatchers.
+//! - **Direct & Indirect Syscall Hunter**: Identifies direct kernel transitions (`syscall`, `sysenter`,
+//!   `int 0x2e`) and indirect syscall trampolines, resolving System Service Numbers (SSNs) to native NT APIs.
+//! - **Micro-Emulation & Automated API Hash Resolver**: Disassembles immediate operands and scans memory
+//!   for precomputed ROR13, DJB2, and DJB2a hashes against a built-in database of top Win32/NT APIs.
+//! - **Authenticode Forensics & Signature Overlay Auditing**: Analyzes `WIN_CERTIFICATE` directories,
+//!   extracts Subject CN, Issuer CN, Organization, flags self-signed certificates, and detects trailing
+//!   overlay tampering appended after digital signatures.
+//! - **Multi-Platform Hardening & Entitlements**:
+//!   - **Mach-O**: Extracts XML entitlement plists and flags high-risk capabilities (`get-task-allow`, `disable-library-validation`).
+//!   - **ELF**: Inspects ELF program headers and symbols to detect NX (Non-Executable Stack), Stack Canary (`__stack_chk_fail`),
+//!     RELRO levels (None, Partial, Full), and Position Independent Executables (PIE).
 //! - **High-Throughput Matching**: Combines multi-string Aho-Corasick matching, PCRE-compatible
 //!   regular expressions, and optimized hex wildcards with linear byte scans.
 //! - **Deep Binary Introspection**: Native zero-copy parsers for **PE32/PE32+**, **ELF32/ELF64**,

@@ -264,3 +264,116 @@ rule detect_rust_ransomware {
         rust.is_rust and rust.has_crate("aes_gcm")
 }
 ```
+
+---
+
+## 8. Control Flow Graph (CFG) & Cyclomatic Complexity (`cfg.*`)
+
+Raya 2.0 constructs a basic-block directed control flow graph from disassembled instructions, discovering execution paths and control flow anomalies:
+
+* `cfg.has_loop`: Evaluates to `true` if one or more natural back-edge loops are detected.
+* `cfg.loop_count`: Returns the number of natural loops discovered via dominator tree analysis.
+* `cfg.cyclomatic_complexity`: Calculates McCabe's Cyclomatic Complexity:
+  $$M = E - V + 2P$$
+* `cfg.is_flattened`: Flags Control Flow Flattening (CFF) obfuscation (e.g. OLLVM dispatcher / switch state machine).
+* `cfg.blocks_count`: Total number of basic blocks in the CFG.
+* `cfg.edges_count`: Total number of directed edges in the CFG.
+
+```raya
+rule detect_obfuscated_cff {
+    meta:
+        description = "Detects control flow flattening and extreme complexity"
+        severity = "high"
+    condition:
+        cfg.is_flattened or cfg.cyclomatic_complexity > 500
+}
+```
+
+---
+
+## 9. Direct & Indirect Syscall Evasion Hunter (`syscall.*`)
+
+Modern malware evades userland EDR API hooks by invoking native Windows kernel transitions directly (`syscall`, `sysenter`, `int 0x2e`) or jumping to indirect syscall trampolines:
+
+* `pe.has_direct_syscall` / `disasm.has_direct_syscall`: Flags direct syscall instructions present in code sections.
+* `pe.has_indirect_syscall` / `disasm.has_indirect_syscall`: Flags indirect syscall trampolines (`mov r10, rcx; mov eax, SSN; jmp qword ptr [ntdll_trampoline]`).
+
+Raya's disassembler decodes the SSN (System Service Number) and resolves it to its associated Windows Native API (e.g. `NtAllocateVirtualMemory`, `NtProtectVirtualMemory`, `NtCreateThreadEx`).
+
+```raya
+rule detect_edr_syscall_evasion {
+    meta:
+        description = "Detects direct and indirect syscall execution stubs"
+        severity = "critical"
+        technique = "T1562.001"
+    condition:
+        pe.is_pe and (pe.has_direct_syscall or pe.has_indirect_syscall)
+}
+```
+
+---
+
+## 10. Micro-Emulation & Automated API Hash Resolver (`api_hash.*`)
+
+Adversaries dynamically resolve API addresses using hashing algorithms to avoid populating the PE Import Address Table (IAT):
+
+* `pe.has_api_hash`: Evaluates to `true` if any known API hash is detected in instruction immediate values or raw memory.
+* `pe.api_hash("algorithm", "ApiName")`: Evaluates to `true` if a specific algorithm hash matches the requested API (supports `ROR13`, `DJB2`, `DJB2a`).
+
+Raya includes a built-in precomputed hash table covering the top 60 Windows native and userland APIs frequently abused by threat actors.
+
+```raya
+rule detect_api_hashing_loader {
+    meta:
+        description = "Identifies ROR13 API hashing for virtual memory allocation"
+        severity = "critical"
+        technique = "T1027.007"
+    condition:
+        pe.is_pe and (
+            pe.api_hash("ror13", "NtAllocateVirtualMemory")
+            or pe.api_hash("djb2", "VirtualAlloc")
+        )
+}
+```
+
+---
+
+## 11. Authenticode PKCS#7 Forensics & Signature Overlay Auditing
+
+Raya inspects PE digital signatures via the `IMAGE_DIRECTORY_ENTRY_SECURITY` descriptor:
+
+* `pe.has_signature_overlay`: Detects malicious overlays or data appended after the cryptographic signature boundaries.
+* `pe.overlay_size`: Returns the size in bytes of the detected overlay.
+* `pe.is_self_signed`: Identifies certificates where Subject Common Name equals Issuer Common Name, flagging unverified self-signed binaries.
+
+```raya
+rule detect_signature_overlay_tampering {
+    meta:
+        description = "Detects PE files with suspicious signature overlay appendages"
+        severity = "high"
+        technique = "T1553.002"
+    condition:
+        pe.is_pe and pe.has_signature_overlay and pe.overlay_size > 1024
+}
+```
+
+---
+
+## 12. Multi-Platform Security Hardening (Mach-O & ELF)
+
+### Mach-O Entitlements (`macho.*`)
+* `macho.has_entitlement(name)`: Checks for the existence of an entitlement in embedded XML plists.
+* `macho.has_dangerous_entitlement`: Evaluates to `true` if high-risk entitlements are detected (`get-task-allow`, `disable-library-validation`, `allow-unsigned-executable-memory`, `allow-dyld-environment-variables`).
+
+### ELF Compiler Mitigations (`elf.*`)
+* `elf.has_nx`: Non-executable stack protection (`PT_GNU_STACK` permissions).
+* `elf.has_canary`: Stack smashing protector (`__stack_chk_fail` symbol).
+* `elf.relro`: Relocation Read-Only hardening level (`"None"`, `"Partial"`, `"Full"`).
+* `elf.is_pie`: Position Independent Executable status.
+
+```raya
+rule detect_vulnerable_elf_binary {
+    condition:
+        elf.is_elf and not elf.has_nx and elf.relro == "None"
+}
+```

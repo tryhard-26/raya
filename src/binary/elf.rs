@@ -26,6 +26,10 @@ pub struct ElfInfo {
     pub sections: Vec<ElfSection>,
     pub dynamic_libraries: Vec<String>,
     pub symbols: Vec<String>,
+    pub has_nx: bool,
+    pub has_canary: bool,
+    pub relro: String,
+    pub is_pie: bool,
 }
 
 impl ElfInfo {
@@ -41,6 +45,10 @@ impl ElfInfo {
             sections: Vec::new(),
             dynamic_libraries: Vec::new(),
             symbols: Vec::new(),
+            has_nx: false,
+            has_canary: false,
+            relro: "None".to_string(),
+            is_pie: false,
         }
     }
 
@@ -144,26 +152,41 @@ pub fn parse_elf(data: &[u8]) -> Option<ElfInfo> {
     let is_executable = elf_type == 2; // ET_EXEC
     let is_shared_object = elf_type == 3; // ET_DYN
 
-    let (entry_point, sh_offset, sh_entry_size, sh_num, sh_str_ndx) = if is_64 {
+    let (
+        entry_point,
+        sh_offset,
+        sh_entry_size,
+        sh_num,
+        sh_str_ndx,
+        ph_offset,
+        ph_entry_size,
+        ph_num,
+    ) = if is_64 {
         if data.len() < 64 {
             return None;
         }
         let ep = read_u64(24)?;
+        let phoff = read_u64(32)? as usize;
         let shoff = read_u64(40)? as usize;
+        let phents = read_u16(54)? as usize;
+        let phnum = read_u16(56)? as usize;
         let shents = read_u16(58)? as usize;
         let shnum = read_u16(60)? as usize;
         let shstr = read_u16(62)? as usize;
-        (ep, shoff, shents, shnum, shstr)
+        (ep, shoff, shents, shnum, shstr, phoff, phents, phnum)
     } else {
         if data.len() < 52 {
             return None;
         }
         let ep = read_u32(24)? as u64;
+        let phoff = read_u32(28)? as usize;
         let shoff = read_u32(32)? as usize;
+        let phents = read_u16(42)? as usize;
+        let phnum = read_u16(44)? as usize;
         let shents = read_u16(46)? as usize;
         let shnum = read_u16(48)? as usize;
         let shstr = read_u16(50)? as usize;
-        (ep, shoff, shents, shnum, shstr)
+        (ep, shoff, shents, shnum, shstr, phoff, phents, phnum)
     };
 
     // Locate section string table (.shstrtab)
@@ -255,6 +278,43 @@ pub fn parse_elf(data: &[u8]) -> Option<ElfInfo> {
         });
     }
 
+    // Parse Program Headers for Security Mitigations
+    let mut has_nx = false;
+    let mut has_relro = false;
+
+    if ph_offset > 0 && ph_num > 0 && ph_entry_size >= 32 {
+        for i in 0..ph_num {
+            let p_start = ph_offset + i * ph_entry_size;
+            if p_start + ph_entry_size <= data.len() {
+                let p_type = read_u32(p_start).unwrap_or(0);
+                if p_type == 0x6474e551 {
+                    // PT_GNU_STACK
+                    let p_flags = if is_64 {
+                        read_u32(p_start + 4).unwrap_or(0)
+                    } else {
+                        read_u32(p_start + 24).unwrap_or(0)
+                    };
+                    // Non-executable stack if PF_X (0x1) is NOT set
+                    if (p_flags & 0x1) == 0 {
+                        has_nx = true;
+                    }
+                } else if p_type == 0x6474e552 {
+                    // PT_GNU_RELRO
+                    has_relro = true;
+                }
+            }
+        }
+    }
+
+    let relro = if has_relro {
+        "Partial".to_string()
+    } else {
+        "None".to_string()
+    };
+
+    let has_canary = data.windows(16).any(|w| w == b"__stack_chk_fail");
+    let is_pie = is_shared_object && entry_point != 0;
+
     Some(ElfInfo {
         is_elf: true,
         is_64,
@@ -266,5 +326,9 @@ pub fn parse_elf(data: &[u8]) -> Option<ElfInfo> {
         sections,
         dynamic_libraries: Vec::new(),
         symbols: Vec::new(),
+        has_nx,
+        has_canary,
+        relro,
+        is_pie,
     })
 }

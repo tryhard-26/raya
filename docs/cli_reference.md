@@ -7,7 +7,7 @@ Complete reference manual for the `raya` command-line utility.
 ## Global Options
 
 * `-h, --help`: Displays usage information.
-* `-V, --version`: Prints version information (`raya 0.3.0`).
+* `-V, --version`: Prints version information (`raya 2.0.0`).
 
 ---
 
@@ -16,7 +16,7 @@ Complete reference manual for the `raya` command-line utility.
 | Command | Arguments | Description |
 | :--- | :--- | :--- |
 | `scan` | `<TARGET> --rules <PATH>` | Scans files, directories, stdin, or process memory against detection rules. |
-| `inspect` | `<TARGET> [--json]` | Interactive forensic inspection dashboard (hashes, entropy, headers, crypto, strings, runtimes). |
+| `inspect` | `<TARGET> [--json]` | Interactive forensic inspection dashboard (hashes, entropy, headers, CFG, syscalls, API hashes, Authenticode, compiler mitigations, crypto, strings, runtimes). |
 | `convert` | `<INPUT.yar> -o <OUTPUT.raya>` | Transpiles legacy YARA rules into native Raya detection rules. |
 | `check` | `<RULES_PATH>` | Validates rule syntax, AST construction, and pattern compilation. |
 | `compile` | `<RULES_PATH> -o <OUTPUT>` | Compiles rules into a serialized binary format for rapid loading. |
@@ -62,7 +62,7 @@ raya scan <TARGET> [OPTIONS]
 
 ### 2. `raya inspect`
 
-Performs deep forensic binary triage and structural inspection. Generates comprehensive file metrics, cryptographic hashes (including fuzzy and header hashes), visual entropy heatmaps, section permissions, embedded cryptographic constants, deobfuscated stack strings, and runtime metadata (.NET, Go, Rust).
+Performs deep forensic binary triage and structural inspection. Generates comprehensive file metrics, cryptographic hashes (including fuzzy and header hashes), visual entropy heatmaps, section permissions, Control Flow Graph (CFG) metrics and cyclomatic complexity, Direct/Indirect Syscall detection, Micro-Emulation API hash recovery (ROR13/DJB2), Authenticode signature & overlay audit, ELF hardening mitigations (NX, canary, RELRO, PIE), Mach-O security & entitlements, embedded cryptographic constants, deobfuscated stack strings, and runtime metadata (.NET, Go, Rust).
 
 ```bash
 raya inspect <TARGET> [OPTIONS]

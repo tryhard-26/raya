@@ -1,0 +1,11 @@
+rule api_hashing_resolution : windows evasion defense_evasion {
+    meta:
+        author = "Raya Research Team"
+        description = "Detects dynamic Windows API resolution using ROR13 or DJB2 hashing"
+        severity = "high"
+        technique = "T1027.007"
+        reference = "https://attack.mitre.org/techniques/T1027/007/"
+
+    condition:
+        pe.is_pe and pe.has_api_hash
+}

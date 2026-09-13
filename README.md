@@ -120,24 +120,42 @@ Options:
 
 ---
 
-## Core Capabilities
+## Core Capabilities (Raya 2.0)
 
-### 1. In-Memory Encrypted Archive Triage
-Raya identifies encrypted archive drops (ZipCrypto and WinZip AES-256) and brute-forces standard malware passwords (`infected`, `malware`, `password`, `clean`, `1234`) or user-supplied passwords entirely in RAM, inspecting nested payloads without disk I/O.
+### 1. Control Flow Graph (CFG) & Cyclomatic Complexity Analysis
+Builds basic-block directed control flow graphs from disassembled instructions, identifying edges (`Fallthrough`, `Unconditional`, `ConditionalTrue`, `ConditionalFalse`, `Indirect`). Computes McCabe's Cyclomatic Complexity:
+$$M = E - V + 2P$$
+Performs iterative dominator analysis to detect natural back-edge loops (`cfg.has_loop`, `cfg.loop_count`), and flags Control Flow Flattening (CFF) state-machine dispatchers (`cfg.is_flattened`).
 
-### 2. Zero-Empty-Evidence Guarantee
-Traditional pattern matchers often report only a triggered rule name. Raya records structured evidence graphs for every match: exact byte offsets, imported APIs, exported symbols, entropy spikes, disassembled instruction addresses, and static call arguments.
+### 2. Direct & Indirect Syscall Evasion Hunter
+Detects modern EDR bypass techniques including direct kernel transitions (`syscall`, `sysenter`, `int 0x2e`) and indirect syscall trampolines. Extracts the System Service Number (SSN) from loading stubs (`mov eax, ssn`) and automatically maps it to the corresponding Windows Native API (e.g. `0x18 -> NtAllocateVirtualMemory`, `0x50 -> NtProtectVirtualMemory`).
 
-### 3. Basic-Block & Function Scoping
+### 3. Micro-Emulation & Automated API Hash Resolver
+Identifies malware resolving Windows APIs via hashing algorithms (commonly used by Cobalt Strike, TrickBot, Emotet, and custom loaders). Disassembles immediate operands and scans memory for precomputed **ROR13**, **DJB2**, and **DJB2a** hashes against a built-in database of top Win32/NT APIs.
+
+### 4. Authenticode PKCS#7 Forensics & Signature Overlay Auditing
+Parses PE `IMAGE_DIRECTORY_ENTRY_SECURITY` (`WIN_CERTIFICATE`) structures to extract Subject Common Name, Issuer, and Organization. Identifies self-signed certificates and detects hidden payloads appended as signature overlays (`pe.has_signature_overlay`, `pe.overlay_size`) without invalidating the PE header structure.
+
+### 5. Multi-Platform Hardening & Entitlements
+* **Mach-O Entitlements**: Extracts embedded XML plist entitlements, flagging high-risk attack surfaces such as `get-task-allow`, `disable-library-validation`, and `allow-unsigned-executable-memory`.
+* **ELF Compiler Mitigations**: Audits program headers and symbols to detect Non-Executable Stack (`PT_GNU_STACK`), Stack Canary (`__stack_chk_fail`), RELRO hardening levels (None, Partial, Full), and Position Independent Executables (PIE).
+
+### 6. In-Memory Encrypted Archive Triage
+Identifies encrypted archive drops (ZipCrypto and WinZip AES-256) and brute-forces standard malware passwords (`infected`, `malware`, `password`, `clean`, `1234`) or user-supplied passwords entirely in RAM, inspecting nested payloads without disk I/O.
+
+### 7. Zero-Empty-Evidence Guarantee
+Traditional pattern matchers often report only a triggered rule name. Raya records structured evidence graphs for every match: exact byte offsets, imported APIs, exported symbols, entropy spikes, disassembled instruction addresses, static call arguments, CFG anomalies, and syscall stubs.
+
+### 8. Basic-Block & Function Scoping
 Linear disassembly via `iced-x86` partitions instruction streams into strict basic blocks. The `pe.in_basic_block` heuristic verifies that instructions co-occur within the same straight-line block without crossing control flow or jump boundaries, eliminating file-level false positives.
 
-### 4. Static API Call Argument Tracking
+### 9. Static API Call Argument Tracking
 Analyzes instruction sequences preceding imported API invocations to track static parameter values. Detects dangerous constants passed to critical primitives, such as `PAGE_EXECUTE_READWRITE` (`0x40`) passed to `VirtualAlloc` or `VirtualProtect`.
 
-### 5. Automated Stack String Deobfuscation
+### 10. Automated Stack String Deobfuscation
 Tracks sequential immediate writes to stack frames (`mov [rbp - disp], imm`), sign-extends frame offsets, and reconstructs hidden ASCII and UTF-16LE strings without requiring dynamic emulation.
 
-### 6. Cryptographic Constant & S-Box Identification
+### 11. Cryptographic Constant & S-Box Identification
 Multi-pattern scanner detecting compiled cryptographic primitives:
 * AES forward and inverse S-boxes
 * ChaCha20 / Salsa20 constants (`"expand 32-byte k"`)
@@ -146,19 +164,16 @@ Multi-pattern scanner detecting compiled cryptographic primitives:
 * CRC32 IEEE 802.3 lookup table constants
 * SM4 block cipher S-box
 
-### 7. Microsoft PE Rich Header Forensics
+### 12. Microsoft PE Rich Header Forensics
 Calculates the authentic Microsoft Rich header checksum from the DOS stub and compiler record entries. Identifies header tampering, forged build environments, or corrupted toolchains via `pe.rich_checksum_mismatch`.
 
-### 8. Modern Runtime Introspection
+### 13. Modern Runtime Introspection
 * **.NET / CLR**: Parses BSJB metadata roots, `#US` user strings (C2 URLs, Base64 configs), type names, and method definitions via `dotnet.*`.
 * **Go**: Parses `.gopclntab` structures, extracting compiler versions and package/function symbols via `go.*`.
 * **Rust**: Identifies rustc commit hashes and statically linked crates (e.g. `reqwest`, `tokio`) via `rust.*`.
 
-### 9. Zero-Copy Executable Parsers
-High-throughput parsing of PE32/PE32+, ELF32/ELF64, and Mach-O (32-bit, 64-bit, and Universal FAT) binaries, extracting headers, section tables, entropy, import/export tables, TLS callbacks, and permission bitmasks (e.g. RWX).
-
-### 10. Standards-Compliant Reporting
-Native export to **OASIS SARIF v2.1.0** (GitHub Advanced Security compatible) and **OASIS STIX 2.1** Threat Intelligence indicator bundles.
+### 14. Zero-Copy Executable Parsers & Enterprise Reporting
+High-throughput parsing of PE32/PE32+, ELF32/ELF64, and Mach-O binaries, exporting detection findings to **OASIS SARIF v2.1.0** (GitHub Advanced Security compatible) and **OASIS STIX 2.1** Threat Intelligence bundles.
 
 ---
 
@@ -204,13 +219,15 @@ $hex_stub = { 55 89 e5 [2-4] 83 ec ?? ( c3 | c9 c3 ) }
 
 ### Introspection Namespaces
 
-* **PE (`pe.*`)**: `pe.is_pe`, `pe.is_dll`, `pe.imphash`, `pe.exphash`, `pe.has_rwx`, `pe.has_tls`, `pe.import("dll", "func")`, `pe.export("func")`, `pe.section(".text").entropy`, `pe.api_call_arg("API", 0x40)`, `pe.in_basic_block("push", "call")`, `pe.has_stack_string`, `pe.stack_string("str")`, `pe.has_rich_header`, `pe.rich_checksum_mismatch`.
+* **PE (`pe.*`)**: `pe.is_pe`, `pe.is_dll`, `pe.imphash`, `pe.exphash`, `pe.has_rwx`, `pe.has_tls`, `pe.has_direct_syscall`, `pe.has_indirect_syscall`, `pe.has_api_hash`, `pe.api_hash("algorithm", "api")`, `pe.has_signature_overlay`, `pe.is_self_signed`, `pe.overlay_size`, `pe.import("dll", "func")`, `pe.export("func")`, `pe.section(".text").entropy`, `pe.api_call_arg("API", 0x40)`, `pe.in_basic_block("push", "call")`, `pe.has_stack_string`, `pe.stack_string("str")`, `pe.has_rich_header`, `pe.rich_checksum_mismatch`.
+* **Control Flow Graph (`cfg.*`)**: `cfg.has_loop`, `cfg.loop_count`, `cfg.cyclomatic_complexity`, `cfg.is_flattened`, `cfg.blocks_count`, `cfg.edges_count`.
+* **Disassembly (`disasm.*`)**: `disasm.has_direct_syscall`, `disasm.has_indirect_syscall`.
 * **.NET (`dotnet.*`)**: `dotnet.is_dotnet`, `dotnet.user_string("str")`, `dotnet.has_type("name")`, `dotnet.has_method("name")`, `dotnet.assembly_name`, `dotnet.clr_version`.
 * **Crypto (`crypto.*`)**: `crypto.has("AES")`, `crypto.has("ChaCha20")`, `crypto.has("SHA-256")`, `crypto.constants_count`, `has_crypto`.
 * **Go (`go.*`)**: `go.is_go`, `go.has_function("name")`, `go.has_package("name")`, `go.version`.
 * **Rust (`rust.*`)**: `rust.is_rust`, `rust.has_crate("name")`, `rust.rustc_commit`.
-* **ELF (`elf.*`)**: `elf.is_elf`, `elf.is_64`, `elf.has_nx`, `elf.import("symbol")`, `elf.section(".name").entropy`.
-* **Mach-O (`macho.*`)**: `macho.is_macho`, `macho.is_fat`, `macho.cpu_type`, `macho.section(seg, sec).entropy`.
+* **ELF (`elf.*`)**: `elf.is_elf`, `elf.is_64`, `elf.has_nx`, `elf.has_canary`, `elf.relro`, `elf.is_pie`, `elf.import("symbol")`, `elf.section(".name").entropy`.
+* **Mach-O (`macho.*`)**: `macho.is_macho`, `macho.is_fat`, `macho.cpu_type`, `macho.has_entitlement("name")`, `macho.has_dangerous_entitlement`, `macho.section(seg, sec).entropy`.
 
 ---
 
@@ -330,6 +347,13 @@ SECTION TABLE & ENTROPY BAR:
   .pdata         130080     130560   6.3878    [████████░░]  R--
   .rsrc            1808       2048   5.0346    [██████░░░░]  R--
   .reloc          42480      42496   5.4679    [███████░░░]  R--
+
+CONTROL FLOW GRAPH (CFG) METRICS:
+  Basic Blocks:          4153
+  Directed Edges:        5722
+  Cyclomatic Complexity: 1571 (EXTREME: Suspected Obfuscation)
+  Natural Loops:         182
+  CFF Obfuscation:       DETECTED (Dispatcher / Switch State-Machine Pattern)
 
 RUST RUNTIME METADATA:
   rustc Commit:  adf8d168af9334a8bf940824fcf4207d01e05ae5

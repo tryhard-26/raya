@@ -131,6 +131,26 @@ fn test_cli_inspect_json() {
     assert_eq!(parsed["format"], "PE32");
     assert_eq!(parsed["filesize"], 2560);
     assert!(parsed["hashes"]["sha256"].is_string());
+    assert!(parsed["cfg"]["blocks_count"].as_u64().unwrap() > 0);
+    assert!(parsed["cfg"]["cyclomatic_complexity"].is_number());
+}
+
+#[test]
+fn test_cli_inspect_elf_json() {
+    let output = Command::new(get_bin_path())
+        .args(["inspect", "tests/fixtures/mirai_sample.elf", "--json"])
+        .output()
+        .expect("Failed to execute raya inspect --json");
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let parsed: serde_json::Value =
+        serde_json::from_str(&stdout).expect("Inspect output should be valid JSON");
+    assert_eq!(parsed["format"], "ELF64");
+    assert!(parsed["elf"]["has_nx"].is_boolean());
+    assert!(parsed["elf"]["has_canary"].is_boolean());
+    assert!(parsed["elf"]["relro"].is_string());
+    assert!(parsed["elf"]["is_pie"].is_boolean());
 }
 
 #[test]

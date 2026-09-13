@@ -10,6 +10,9 @@
 //! - **Golang Introspection** (pclntab, Go versions, packages via [`golang`])
 //! - **Rust Introspection** (rustc toolchain commit, crates via [`rust`])
 
+pub mod api_hash;
+pub mod authenticode;
+pub mod cfg;
 pub mod crypto;
 pub mod disasm;
 pub mod dotnet;
@@ -19,7 +22,11 @@ pub mod golang;
 pub mod macho;
 pub mod pe;
 pub mod rust;
+pub mod syscall;
 
+pub use api_hash::{scan_api_hashes, ApiHashDatabase, ApiHashMatch};
+pub use authenticode::{parse_authenticode, AuthenticodeInfo};
+pub use cfg::{CfgBlock, CfgEdge, CfgLoop, ControlFlowGraph, EdgeType};
 pub use crypto::{analyze_crypto, CryptoAnalysis, CryptoMatch};
 pub use disasm::{extract_stack_strings, ApiCallArgMatch, BasicBlock, ScopedFunction, StackString};
 pub use dotnet::{parse_dotnet, DotNetInfo};
@@ -29,6 +36,7 @@ pub use golang::{parse_go, GoInfo};
 pub use macho::{parse_macho, MachoInfo, MachoSection, MachoSegment};
 pub use pe::{parse_pe, PeImport, PeInfo, PeSection, RichEntry};
 pub use rust::{parse_rust, RustInfo};
+pub use syscall::{detect_syscall_stubs, SyscallStub, SyscallType};
 
 /// Extracted structural metadata from an executable binary.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -51,6 +59,14 @@ pub struct BinaryAnalysis {
     pub rust: Option<RustInfo>,
     /// Extracted stack-constructed strings across executable sections.
     pub stack_strings: Vec<StackString>,
+    /// Reconstructed Control Flow Graph for executable sections.
+    pub cfg: Option<ControlFlowGraph>,
+    /// Detected direct and indirect system call stubs.
+    pub syscalls: Vec<SyscallStub>,
+    /// Resolved API hashes (e.g. ROR13, DJB2).
+    pub api_hashes: Vec<ApiHashMatch>,
+    /// Digital signature and Authenticode metadata, if signed.
+    pub authenticode: Option<AuthenticodeInfo>,
 }
 
 impl BinaryAnalysis {
@@ -102,6 +118,14 @@ impl BinaryAnalysis {
             }
         }
 
+        let cfg = pe.as_ref().and_then(|p| p.cfg.clone());
+        let syscalls = pe.as_ref().map(|p| p.syscalls.clone()).unwrap_or_default();
+        let api_hashes = pe
+            .as_ref()
+            .map(|p| p.api_hashes.clone())
+            .unwrap_or_default();
+        let authenticode = pe.as_ref().and_then(|p| p.authenticode.clone());
+
         Self {
             format,
             pe,
@@ -112,6 +136,10 @@ impl BinaryAnalysis {
             golang,
             rust,
             stack_strings,
+            cfg,
+            syscalls,
+            api_hashes,
+            authenticode,
         }
     }
 }

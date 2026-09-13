@@ -131,6 +131,13 @@ Raya supports full boolean logic:
 | `pe.is_rich_checksum_valid` | True if the Rich header checksum successfully validates against the XOR key. |
 | `pe.rich_comp_id(id)` | True if the Rich header contains the specified compiler component ID. |
 | `pe.rich_product_id(id)` | True if the Rich header contains the specified product/build ID. |
+| `pe.has_direct_syscall` | True if direct kernel transition instructions (`syscall`, `sysenter`, `int 0x2e`) are found in code. |
+| `pe.has_indirect_syscall` | True if indirect syscall trampolines (`mov r10, rcx; mov eax, SSN; jmp [...]`) are detected. |
+| `pe.has_api_hash` | True if any recognized API hash (ROR13/DJB2) is present in instructions or sections. |
+| `pe.api_hash("algo", "api")` | True if hash of named API using specified algorithm is found. |
+| `pe.has_signature_overlay` | True if malicious data or overlay is appended after the Authenticode signature. |
+| `pe.is_self_signed` | True if Authenticode digital signature is self-signed (Subject == Issuer). |
+| `pe.overlay_size` | Size in bytes of trailing signature overlay data. |
 
 ### .NET / CLR Module (`dotnet`)
 
@@ -168,6 +175,17 @@ Raya supports full boolean logic:
 | `rust.has_crate("name")` | True if the binary statically links the specified crate (e.g. `reqwest`, `tokio`). |
 | `rust.rustc_commit` | Git commit hash of the compiling rustc toolchain. |
 
+### Control Flow Graph Module (`cfg`)
+
+| Function / Property | Description |
+| :--- | :--- |
+| `cfg.has_loop` | True if binary control flow contains one or more natural back-edge loops. |
+| `cfg.loop_count` | Number of detected natural loops. |
+| `cfg.cyclomatic_complexity` | McCabe's Cyclomatic Complexity metric ($M = E - V + 2P$). |
+| `cfg.is_flattened` | True if Control Flow Flattening (CFF) state machine obfuscation is detected. |
+| `cfg.blocks_count` | Total count of basic blocks in the CFG. |
+| `cfg.edges_count` | Total count of directed control flow edges. |
+
 ### Disassembly Module (`disasm`)
 
 | Function | Description |
@@ -176,6 +194,8 @@ Raya supports full boolean logic:
 | `disasm.in_function(seq...)` | Checks if instructions occur within a single function boundary. |
 | `disasm.has_instruction("syscall")` | Checks if the instruction mnemonic is present in code. |
 | `disasm.has_instruction_sequence(seq...)` | Checks for consecutive opcode sequence. |
+| `disasm.has_direct_syscall` | True if direct kernel transition instructions are present. |
+| `disasm.has_indirect_syscall` | True if indirect syscall trampolines are detected. |
 
 ### ELF Module (`elf`)
 
@@ -186,7 +206,10 @@ Raya supports full boolean logic:
 | `elf.entry_point` | Virtual address of the entry point. |
 | `elf.number_of_sections` | Total section header count. |
 | `elf.has_section(".name")` | True if section exists. |
-| `elf.has_nx` | True if the stack segment has no execute permission. |
+| `elf.has_nx` | True if the stack segment has no execute permission (`PT_GNU_STACK`). |
+| `elf.has_canary` | True if stack canary protector symbol (`__stack_chk_fail`) is linked. |
+| `elf.relro` | RELRO hardening string (`"None"`, `"Partial"`, `"Full"`). |
+| `elf.is_pie` | True if binary is built as Position Independent Executable. |
 | `elf.import("symbol")` | True if dynamic symbol is imported. |
 
 ### Mach-O Module (`macho`)
@@ -198,6 +221,9 @@ Raya supports full boolean logic:
 | `macho.cpu_type` | CPU architecture type (e.g. x86_64, ARM64). |
 | `macho.number_of_commands` | Number of load commands. |
 | `macho.number_of_segments` | Number of segments. |
+| `macho.is_signed` | True if binary has `LC_CODE_SIGNATURE` command. |
+| `macho.has_entitlement("name")` | True if specified entitlement key exists in embedded XML plist. |
+| `macho.has_dangerous_entitlement` | True if risky entitlements are present (`get-task-allow`, `disable-library-validation`). |
 | `macho.section(seg, sec).entropy` | Entropy of the specified Mach-O section. |
 
 ### Entropy Module (`entropy`)

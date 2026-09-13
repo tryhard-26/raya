@@ -552,6 +552,96 @@ impl<'a, 'b> Evaluator<'a, 'b> {
                             return EvalValue::Bool(false);
                         }
                     }
+                    "has_api_hash" | "api_hash" => {
+                        if let Some(EvalValue::Str(target_api)) = evaluated_args.first() {
+                            let lower = target_api.to_ascii_lowercase();
+                            let algo_filter = evaluated_args.get(1).and_then(|a| match a {
+                                EvalValue::Str(s) => Some(s.to_ascii_lowercase()),
+                                _ => None,
+                            });
+                            if let Some(hit) = pe.api_hashes.iter().find(|m| {
+                                let api_match = m.api_name.to_ascii_lowercase() == lower;
+                                let algo_match = algo_filter
+                                    .as_ref()
+                                    .map(|a| m.algorithm.to_ascii_lowercase() == *a)
+                                    .unwrap_or(true);
+                                api_match && algo_match
+                            }) {
+                                self.context.record_evidence(MatchedEvidence::ApiHash {
+                                    algorithm: hit.algorithm.clone(),
+                                    api_name: hit.api_name.clone(),
+                                    hash_value: hit.hash_value,
+                                    offset: hit.offset,
+                                });
+                                return EvalValue::Bool(true);
+                            }
+                            return EvalValue::Bool(false);
+                        }
+                    }
+                    "has_direct_syscall" => {
+                        let res = pe.has_direct_syscall();
+                        if res {
+                            if let Some(stub) = pe.syscalls.iter().find(|s| {
+                                s.stub_type == crate::binary::syscall::SyscallType::Direct
+                            }) {
+                                self.context
+                                    .record_evidence(MatchedEvidence::SyscallIndicator {
+                                        stub_type: "Direct".to_string(),
+                                        address: stub.address,
+                                        ssn: stub.ssn,
+                                        api_name: stub.estimated_api.clone(),
+                                    });
+                            }
+                        }
+                        return EvalValue::Bool(res);
+                    }
+                    "has_indirect_syscall" => {
+                        let res = pe.has_indirect_syscall();
+                        if res {
+                            if let Some(stub) = pe.syscalls.iter().find(|s| {
+                                s.stub_type == crate::binary::syscall::SyscallType::Indirect
+                            }) {
+                                self.context
+                                    .record_evidence(MatchedEvidence::SyscallIndicator {
+                                        stub_type: "Indirect".to_string(),
+                                        address: stub.address,
+                                        ssn: stub.ssn,
+                                        api_name: stub.estimated_api.clone(),
+                                    });
+                            }
+                        }
+                        return EvalValue::Bool(res);
+                    }
+                    "has_signature_overlay" => {
+                        let res = pe.has_signature_overlay();
+                        if res {
+                            let sz = pe
+                                .authenticode
+                                .as_ref()
+                                .map(|a| a.overlay_size)
+                                .unwrap_or(0);
+                            self.context.record_evidence(
+                                MatchedEvidence::CertificateIndicator {
+                                    detail: format!(
+                                        "Authenticode signature overlay detected beyond PE boundary ({} bytes)",
+                                        sz
+                                    ),
+                                },
+                            );
+                        }
+                        return EvalValue::Bool(res);
+                    }
+                    "is_self_signed" => {
+                        let res = pe.is_self_signed();
+                        if res {
+                            self.context
+                                .record_evidence(MatchedEvidence::CertificateIndicator {
+                                    detail: "PE binary has self-signed Authenticode certificate"
+                                        .to_string(),
+                                });
+                        }
+                        return EvalValue::Bool(res);
+                    }
                     "has_section" => {
                         if let Some(EvalValue::Str(sec_name)) = evaluated_args.first() {
                             let found = pe.has_section(sec_name);
@@ -694,6 +784,74 @@ impl<'a, 'b> Evaluator<'a, 'b> {
                         {
                             return EvalValue::Bool(macho.get_section(seg, sec).is_some());
                         }
+                    }
+                    "has_entitlement" => {
+                        if let Some(EvalValue::Str(ent)) = evaluated_args.first() {
+                            let matched = macho.has_entitlement(ent);
+                            if matched {
+                                self.context
+                                    .record_evidence(MatchedEvidence::Custom(format!(
+                                        "Mach-O entitlement present: {}",
+                                        ent
+                                    )));
+                            }
+                            return EvalValue::Bool(matched);
+                        }
+                    }
+                    "has_dangerous_entitlement" => {
+                        let matched = macho.has_dangerous_entitlement;
+                        if matched {
+                            self.context.record_evidence(MatchedEvidence::Custom(
+                                "Dangerous Mach-O entitlement detected".to_string(),
+                            ));
+                        }
+                        return EvalValue::Bool(matched);
+                    }
+                    _ => {}
+                }
+            }
+        }
+
+        if module == "cfg" {
+            if let Some(cfg) = &self.context.binary.cfg {
+                match function {
+                    "has_loop" => {
+                        let has = cfg.has_loop();
+                        if has {
+                            self.context.record_evidence(MatchedEvidence::CfgIndicator {
+                                detail: format!(
+                                    "Natural loop detected in control flow graph ({} loops)",
+                                    cfg.loop_count()
+                                ),
+                            });
+                        }
+                        return EvalValue::Bool(has);
+                    }
+                    "has_high_cyclomatic_complexity" => {
+                        let threshold = match evaluated_args.first() {
+                            Some(EvalValue::Int(i)) => *i as usize,
+                            _ => 20,
+                        };
+                        let has = cfg.cyclomatic_complexity >= threshold;
+                        if has {
+                            self.context.record_evidence(MatchedEvidence::CfgIndicator {
+                                detail: format!(
+                                    "High cyclomatic complexity M = {} (threshold >= {})",
+                                    cfg.cyclomatic_complexity, threshold
+                                ),
+                            });
+                        }
+                        return EvalValue::Bool(has);
+                    }
+                    "is_flattened" => {
+                        let has = cfg.is_flattened;
+                        if has {
+                            self.context.record_evidence(MatchedEvidence::CfgIndicator {
+                                detail: "Control flow flattening (CFF) obfuscation detected"
+                                    .to_string(),
+                            });
+                        }
+                        return EvalValue::Bool(has);
                     }
                     _ => {}
                 }
@@ -955,6 +1113,62 @@ impl<'a, 'b> Evaluator<'a, 'b> {
                         return EvalValue::Bool(matched);
                     }
                 }
+                "has_direct_syscall" => {
+                    let has =
+                        self.context
+                            .binary
+                            .pe
+                            .as_ref()
+                            .map(|p| p.has_direct_syscall())
+                            .unwrap_or(false)
+                            || self.context.binary.syscalls.iter().any(|s| {
+                                s.stub_type == crate::binary::syscall::SyscallType::Direct
+                            });
+                    if has {
+                        if let Some(stub) =
+                            self.context.binary.syscalls.iter().find(|s| {
+                                s.stub_type == crate::binary::syscall::SyscallType::Direct
+                            })
+                        {
+                            self.context
+                                .record_evidence(MatchedEvidence::SyscallIndicator {
+                                    stub_type: "Direct".to_string(),
+                                    address: stub.address,
+                                    ssn: stub.ssn,
+                                    api_name: stub.estimated_api.clone(),
+                                });
+                        }
+                    }
+                    return EvalValue::Bool(has);
+                }
+                "has_indirect_syscall" => {
+                    let has =
+                        self.context
+                            .binary
+                            .pe
+                            .as_ref()
+                            .map(|p| p.has_indirect_syscall())
+                            .unwrap_or(false)
+                            || self.context.binary.syscalls.iter().any(|s| {
+                                s.stub_type == crate::binary::syscall::SyscallType::Indirect
+                            });
+                    if has {
+                        if let Some(stub) =
+                            self.context.binary.syscalls.iter().find(|s| {
+                                s.stub_type == crate::binary::syscall::SyscallType::Indirect
+                            })
+                        {
+                            self.context
+                                .record_evidence(MatchedEvidence::SyscallIndicator {
+                                    stub_type: "Indirect".to_string(),
+                                    address: stub.address,
+                                    ssn: stub.ssn,
+                                    api_name: stub.estimated_api.clone(),
+                                });
+                        }
+                    }
+                    return EvalValue::Bool(has);
+                }
                 _ => {}
             }
         }
@@ -1159,11 +1373,193 @@ impl<'a, 'b> Evaluator<'a, 'b> {
                                 "stack_strings_count" => {
                                     EvalValue::Int(pe.stack_strings.len() as i64)
                                 }
+                                "has_api_hash" => EvalValue::Bool(!pe.api_hashes.is_empty()),
+                                "api_hashes_count" => EvalValue::Int(pe.api_hashes.len() as i64),
+                                "has_direct_syscall" => {
+                                    let has = pe.has_direct_syscall();
+                                    if has {
+                                        if let Some(stub) = pe.syscalls.iter().find(|s| {
+                                            s.stub_type
+                                                == crate::binary::syscall::SyscallType::Direct
+                                        }) {
+                                            self.context.record_evidence(
+                                                MatchedEvidence::SyscallIndicator {
+                                                    stub_type: "Direct".to_string(),
+                                                    address: stub.address,
+                                                    ssn: stub.ssn,
+                                                    api_name: stub.estimated_api.clone(),
+                                                },
+                                            );
+                                        }
+                                    }
+                                    EvalValue::Bool(has)
+                                }
+                                "has_indirect_syscall" => {
+                                    let has = pe.has_indirect_syscall();
+                                    if has {
+                                        if let Some(stub) = pe.syscalls.iter().find(|s| {
+                                            s.stub_type
+                                                == crate::binary::syscall::SyscallType::Indirect
+                                        }) {
+                                            self.context.record_evidence(
+                                                MatchedEvidence::SyscallIndicator {
+                                                    stub_type: "Indirect".to_string(),
+                                                    address: stub.address,
+                                                    ssn: stub.ssn,
+                                                    api_name: stub.estimated_api.clone(),
+                                                },
+                                            );
+                                        }
+                                    }
+                                    EvalValue::Bool(has)
+                                }
+                                "syscalls_count" => EvalValue::Int(pe.syscalls.len() as i64),
+                                "has_signature_overlay" => {
+                                    let has = pe.has_signature_overlay();
+                                    if has {
+                                        let sz = pe
+                                            .authenticode
+                                            .as_ref()
+                                            .map(|a| a.overlay_size)
+                                            .unwrap_or(0);
+                                        self.context.record_evidence(
+                                            MatchedEvidence::CertificateIndicator {
+                                                detail: format!(
+                                                    "Authenticode signature overlay detected beyond PE boundary ({} bytes)",
+                                                    sz
+                                                ),
+                                            },
+                                        );
+                                    }
+                                    EvalValue::Bool(has)
+                                }
+                                "is_self_signed" => {
+                                    let has = pe.is_self_signed();
+                                    if has {
+                                        self.context
+                                            .record_evidence(MatchedEvidence::CertificateIndicator {
+                                            detail:
+                                                "PE binary has self-signed Authenticode certificate"
+                                                    .to_string(),
+                                        });
+                                    }
+                                    EvalValue::Bool(has)
+                                }
+                                "overlay_size" => EvalValue::Int(
+                                    pe.authenticode
+                                        .as_ref()
+                                        .map(|a| a.overlay_size as i64)
+                                        .unwrap_or(0),
+                                ),
+                                "cert_subject" => pe
+                                    .authenticode
+                                    .as_ref()
+                                    .and_then(|a| a.subject_cn.clone())
+                                    .map(EvalValue::Str)
+                                    .unwrap_or(EvalValue::None),
+                                "cert_issuer" => pe
+                                    .authenticode
+                                    .as_ref()
+                                    .and_then(|a| a.issuer_cn.clone())
+                                    .map(EvalValue::Str)
+                                    .unwrap_or(EvalValue::None),
+                                "cfg" => {
+                                    if let Some(cfg) = &pe.cfg {
+                                        match sub_property {
+                                            Some("has_loop") => EvalValue::Bool(cfg.has_loop()),
+                                            Some("loop_count") => {
+                                                EvalValue::Int(cfg.loops.len() as i64)
+                                            }
+                                            Some("cyclomatic_complexity") => {
+                                                EvalValue::Int(cfg.cyclomatic_complexity as i64)
+                                            }
+                                            Some("is_flattened") => {
+                                                EvalValue::Bool(cfg.is_flattened)
+                                            }
+                                            _ => EvalValue::None,
+                                        }
+                                    } else {
+                                        EvalValue::None
+                                    }
+                                }
                                 _ => EvalValue::None,
                             };
                         } else {
                             return EvalValue::Bool(false);
                         }
+                    } else if var_name == "cfg" {
+                        if let Some(cfg) = &self.context.binary.cfg {
+                            return match property {
+                                "has_loop" => {
+                                    let has = cfg.has_loop();
+                                    if has {
+                                        self.context.record_evidence(
+                                            MatchedEvidence::CfgIndicator {
+                                                detail: format!(
+                                                    "Natural loop detected in control flow graph ({} loops)",
+                                                    cfg.loop_count()
+                                                ),
+                                            },
+                                        );
+                                    }
+                                    EvalValue::Bool(has)
+                                }
+                                "loop_count" => EvalValue::Int(cfg.loops.len() as i64),
+                                "cyclomatic_complexity" => {
+                                    EvalValue::Int(cfg.cyclomatic_complexity as i64)
+                                }
+                                "is_flattened" => {
+                                    let has = cfg.is_flattened;
+                                    if has {
+                                        self.context
+                                            .record_evidence(MatchedEvidence::CfgIndicator {
+                                            detail:
+                                                "Control flow flattening (CFF) obfuscation detected"
+                                                    .to_string(),
+                                        });
+                                    }
+                                    EvalValue::Bool(has)
+                                }
+                                "blocks_count" => EvalValue::Int(cfg.blocks.len() as i64),
+                                "edges_count" => EvalValue::Int(cfg.edges.len() as i64),
+                                _ => EvalValue::None,
+                            };
+                        } else {
+                            return EvalValue::Bool(false);
+                        }
+                    } else if var_name == "disasm" {
+                        return match property {
+                            "has_direct_syscall" => {
+                                let has = self
+                                    .context
+                                    .binary
+                                    .pe
+                                    .as_ref()
+                                    .map(|p| p.has_direct_syscall())
+                                    .unwrap_or(false)
+                                    || self.context.binary.syscalls.iter().any(|s| {
+                                        s.stub_type == crate::binary::syscall::SyscallType::Direct
+                                    });
+                                EvalValue::Bool(has)
+                            }
+                            "has_indirect_syscall" => {
+                                let has = self
+                                    .context
+                                    .binary
+                                    .pe
+                                    .as_ref()
+                                    .map(|p| p.has_indirect_syscall())
+                                    .unwrap_or(false)
+                                    || self.context.binary.syscalls.iter().any(|s| {
+                                        s.stub_type == crate::binary::syscall::SyscallType::Indirect
+                                    });
+                                EvalValue::Bool(has)
+                            }
+                            "syscalls_count" => {
+                                EvalValue::Int(self.context.binary.syscalls.len() as i64)
+                            }
+                            _ => EvalValue::None,
+                        };
                     } else if var_name == "dotnet" {
                         if let Some(dotnet) = &self.context.binary.dotnet {
                             return match property {
@@ -1244,6 +1640,10 @@ impl<'a, 'b> Evaluator<'a, 'b> {
                                     EvalValue::Int(elf.number_of_sections as i64)
                                 }
                                 "entry_point" => EvalValue::Int(elf.entry_point as i64),
+                                "has_canary" => EvalValue::Bool(elf.has_canary),
+                                "has_nx" => EvalValue::Bool(elf.has_nx),
+                                "is_pie" => EvalValue::Bool(elf.is_pie),
+                                "relro" => EvalValue::Str(elf.relro.clone()),
                                 _ => EvalValue::None,
                             };
                         } else {
@@ -1262,6 +1662,12 @@ impl<'a, 'b> Evaluator<'a, 'b> {
                                 "number_of_segments" => EvalValue::Int(macho.segments.len() as i64),
                                 "entry_point" => EvalValue::Int(macho.entry_point as i64),
                                 "cpu_type" => EvalValue::Int(macho.cpu_type as i64),
+                                "has_dangerous_entitlement" => {
+                                    EvalValue::Bool(macho.has_dangerous_entitlement)
+                                }
+                                "entitlements_count" => {
+                                    EvalValue::Int(macho.entitlements.len() as i64)
+                                }
                                 _ => EvalValue::None,
                             };
                         } else {

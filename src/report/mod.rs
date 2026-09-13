@@ -187,7 +187,7 @@ impl ScanResult {
             ));
             out.push_str(&format!(
                 "\n{}\n",
-                "✓ No rules matched (clean)".green().bold()
+                "[+] No rules matched (clean)".green().bold()
             ));
             return out;
         }
@@ -261,16 +261,16 @@ impl ScanResult {
                     MatchedEvidence::StringMatch { id, count, offsets } => {
                         let offset_preview: Vec<String> = offsets
                             .iter()
-                            .take(3)
+                            .take(5)
                             .map(|o| format!("0x{:x}", o))
                             .collect();
-                        let more = if offsets.len() > 3 {
-                            format!(" +{} more", offsets.len() - 3)
+                        let more = if offsets.len() > 5 {
+                            format!(" (+{} more)", offsets.len() - 5)
                         } else {
                             String::new()
                         };
                         out.push_str(&format!(
-                            "    ✓ Pattern {} ({} hit(s) at [{}]{})\n",
+                            "    [+] Pattern {} ({} hit(s) at [{}]{})\n",
                             id.green(),
                             count,
                             offset_preview.join(", "),
@@ -279,26 +279,26 @@ impl ScanResult {
                     }
                     MatchedEvidence::PeImport { dll, function } => {
                         out.push_str(&format!(
-                            "    ✓ Imported API: {}!{}\n",
+                            "    [+] Imported API: {}!{}\n",
                             dll.cyan(),
                             function.yellow().bold()
                         ));
                     }
                     MatchedEvidence::PeExport { function } => {
-                        out.push_str(&format!("    ✓ Exported Symbol: {}\n", function.yellow()));
+                        out.push_str(&format!("    [+] Exported Symbol: {}\n", function.yellow()));
                     }
                     MatchedEvidence::PeSectionEntropy {
                         section, entropy, ..
                     } => {
                         out.push_str(&format!(
-                            "    ✓ Section '{}' entropy: {:.2}\n",
+                            "    [+] Section '{}' entropy: {:.2}\n",
                             section.cyan(),
                             entropy
                         ));
                     }
                     MatchedEvidence::PeSectionFlag { section, flag } => {
                         out.push_str(&format!(
-                            "    ✓ Section '{}' flag: {}\n",
+                            "    [+] Section '{}' flag: {}\n",
                             section.cyan(),
                             flag.red()
                         ));
@@ -309,7 +309,7 @@ impl ScanResult {
                         indicators,
                     } => {
                         out.push_str(&format!(
-                            "    ✓ Quantifier: {}/{} indicators satisfied ({})\n",
+                            "    [+] Quantifier: {}/{} indicators satisfied ({})\n",
                             matched,
                             required,
                             indicators.join(", ")
@@ -317,26 +317,26 @@ impl ScanResult {
                     }
                     MatchedEvidence::FileEntropy { entropy, threshold } => {
                         out.push_str(&format!(
-                            "    ✓ High file entropy: {:.2} (threshold > {:.2})\n",
+                            "    [+] High file entropy: {:.2} (threshold > {:.2})\n",
                             entropy, threshold
                         ));
                     }
                     MatchedEvidence::PeCharacteristic { name, detail } => {
                         out.push_str(&format!(
-                            "    ✓ PE characteristic: {} ({})\n",
+                            "    [+] PE characteristic: {} ({})\n",
                             name.cyan().bold(),
                             detail.yellow()
                         ));
                     }
                     MatchedEvidence::Imphash { imphash } => {
                         out.push_str(&format!(
-                            "    ✓ Import Hash (imphash): {}\n",
+                            "    [+] Import Hash (imphash): {}\n",
                             imphash.magenta().bold()
                         ));
                     }
                     MatchedEvidence::Exphash { exphash } => {
                         out.push_str(&format!(
-                            "    ✓ Export Hash (exphash): {}\n",
+                            "    [+] Export Hash (exphash): {}\n",
                             exphash.magenta().bold()
                         ));
                     }
@@ -355,7 +355,7 @@ impl ScanResult {
                             )
                         };
                         out.push_str(&format!(
-                            "    ✓ TLS Callbacks: {} callback(s) registered{}\n",
+                            "    [+] TLS Callbacks: {} callback(s) registered{}\n",
                             count.to_string().red().bold(),
                             addrs_str.dimmed()
                         ));
@@ -368,7 +368,7 @@ impl ScanResult {
                         address,
                     } => {
                         out.push_str(&format!(
-                            "    ✓ API Call Argument: {}!{} = 0x{:x} ({}) at VA 0x{:x}\n",
+                            "    [+] API Call Argument: {}!{} = 0x{:x} ({}) at VA 0x{:x}\n",
                             api.cyan().bold(),
                             argument_name.yellow(),
                             value,
@@ -378,14 +378,14 @@ impl ScanResult {
                     }
                     MatchedEvidence::BasicBlockMatch { mnemonics, address } => {
                         out.push_str(&format!(
-                            "    ✓ Scoped Basic Block at VA 0x{:x}: [{}]\n",
+                            "    [+] Scoped Basic Block at VA 0x{:x}: [{}]\n",
                             address,
                             mnemonics.join(" -> ").yellow()
                         ));
                     }
                     MatchedEvidence::FunctionMatch { mnemonics, address } => {
                         out.push_str(&format!(
-                            "    ✓ Scoped Function at VA 0x{:x}: [{}]\n",
+                            "    [+] Scoped Function at VA 0x{:x}: [{}]\n",
                             address,
                             mnemonics.join(" -> ").yellow()
                         ));
@@ -396,7 +396,7 @@ impl ScanResult {
                         is_wide,
                     } => {
                         out.push_str(&format!(
-                            "    ✓ Deobfuscated Stack String: \"{}\" at VA 0x{:x}{}\n",
+                            "    [+] Deobfuscated Stack String: \"{}\" at VA 0x{:x}{}\n",
                             value.green().bold(),
                             offset,
                             if *is_wide { " (UTF-16LE)" } else { "" }
@@ -408,29 +408,79 @@ impl ScanResult {
                         offset,
                     } => {
                         out.push_str(&format!(
-                            "    ✓ Cryptographic Constant [{}]: {} at offset 0x{:x}\n",
+                            "    [+] Cryptographic Constant [{}]: {} at offset 0x{:x}\n",
                             algorithm.magenta().bold(),
                             description,
                             offset
                         ));
                     }
                     MatchedEvidence::DotNetIndicator { indicator } => {
-                        out.push_str(&format!("    ✓ .NET CLR Indicator: {}\n", indicator.cyan()));
+                        out.push_str(&format!(
+                            "    [+] .NET CLR Indicator: {}\n",
+                            indicator.cyan()
+                        ));
                     }
                     MatchedEvidence::GoIndicator { indicator } => {
-                        out.push_str(&format!("    ✓ Golang Indicator: {}\n", indicator.cyan()));
+                        out.push_str(&format!("    [+] Golang Indicator: {}\n", indicator.cyan()));
                     }
                     MatchedEvidence::RustIndicator { indicator } => {
-                        out.push_str(&format!("    ✓ Rust Indicator: {}\n", indicator.cyan()));
+                        out.push_str(&format!("    [+] Rust Indicator: {}\n", indicator.cyan()));
                     }
                     MatchedEvidence::RichAnomaly { detail } => {
                         out.push_str(&format!(
-                            "    ✓ Rich Header Anomaly: {}\n",
+                            "    [+] Rich Header Anomaly: {}\n",
                             detail.red().bold()
                         ));
                     }
+                    MatchedEvidence::CfgIndicator { detail } => {
+                        out.push_str(&format!(
+                            "    [+] CFG Anomaly: {}\n",
+                            detail.yellow().bold()
+                        ));
+                    }
+                    MatchedEvidence::SyscallIndicator {
+                        stub_type,
+                        address,
+                        ssn,
+                        api_name,
+                    } => {
+                        let ssn_str = ssn
+                            .map(|s| format!(" [SSN: 0x{:02X}]", s))
+                            .unwrap_or_default();
+                        let api_str = api_name
+                            .as_ref()
+                            .map(|a| format!(" -> {}", a.yellow().bold()))
+                            .unwrap_or_default();
+                        out.push_str(&format!(
+                            "    [+] {} Syscall at VA 0x{:x}{}{}\n",
+                            stub_type.red().bold(),
+                            address,
+                            ssn_str,
+                            api_str
+                        ));
+                    }
+                    MatchedEvidence::ApiHash {
+                        algorithm,
+                        api_name,
+                        hash_value,
+                        offset,
+                    } => {
+                        out.push_str(&format!(
+                            "    [+] Resolved API Hash [{}]: {} (0x{:08X}) at VA 0x{:x}\n",
+                            algorithm.magenta(),
+                            api_name.yellow().bold(),
+                            hash_value,
+                            offset
+                        ));
+                    }
+                    MatchedEvidence::CertificateIndicator { detail } => {
+                        out.push_str(&format!(
+                            "    [+] Digital Signature / Authenticode: {}\n",
+                            detail.cyan()
+                        ));
+                    }
                     MatchedEvidence::Custom(msg) => {
-                        out.push_str(&format!("    ✓ {}\n", msg));
+                        out.push_str(&format!("    [+] {}\n", msg));
                     }
                 }
             }

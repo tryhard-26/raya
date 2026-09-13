@@ -111,7 +111,10 @@ pub fn run_check(args: CheckArgs) -> i32 {
     if total_failed > 0 {
         2
     } else {
-        println!("\n{}", "✓ All rules validated successfully.".green().bold());
+        println!(
+            "\n{}",
+            "[+] All rules validated successfully.".green().bold()
+        );
         0
     }
 }

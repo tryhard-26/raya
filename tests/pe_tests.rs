@@ -229,3 +229,117 @@ fn test_basic_block_scoping_rule() {
         "Should not match across jump boundary"
     );
 }
+
+#[test]
+fn test_pe_syscall_evasion_rule() {
+    // mov r10, rcx; mov eax, 0x18; syscall; ret
+    let code = [
+        0x49, 0x89, 0xCA, // mov r10, rcx
+        0xB8, 0x18, 0x00, 0x00, 0x00, // mov eax, 0x18 (NtAllocateVirtualMemory)
+        0x0F, 0x05, // syscall
+        0xC3, // ret
+    ];
+
+    let mock_pe = build_mock_pe(&[(".text", 0x60000020, &code)], &[]);
+
+    let rule_src = r#"
+        rule Detect_Direct_Syscall {
+            meta:
+                severity = "critical"
+            condition:
+                pe.is_pe and (pe.has_direct_syscall or disasm.has_direct_syscall)
+        }
+    "#;
+
+    let rules = raya::parser::parse_rules_from_str(rule_src).unwrap();
+    let engine = raya::engine::Engine::compile_rules(rules).unwrap();
+    let res = engine.scan_bytes(&mock_pe, "syscall_sample.exe");
+
+    assert!(res.has_matches());
+    assert_eq!(res.matches[0].rule, "Detect_Direct_Syscall");
+    assert!(!res.matches[0].evidence.is_empty());
+
+    match &res.matches[0].evidence[0] {
+        raya::engine::context::MatchedEvidence::SyscallIndicator {
+            stub_type,
+            ssn,
+            api_name,
+            ..
+        } => {
+            assert_eq!(stub_type, "Direct");
+            assert_eq!(*ssn, Some(0x18));
+            assert_eq!(api_name.as_deref(), Some("NtAllocateVirtualMemory"));
+        }
+        other => panic!("Expected SyscallIndicator evidence, got {:?}", other),
+    }
+}
+
+#[test]
+fn test_pe_api_hash_rule() {
+    let hash = raya::binary::api_hash::ror13("NtAllocateVirtualMemory");
+    let mut code = vec![0xBA]; // mov edx, imm32
+    code.extend_from_slice(&hash.to_le_bytes());
+    code.push(0xC3); // ret
+
+    let mock_pe = build_mock_pe(&[(".text", 0x60000020, &code)], &[]);
+
+    let rule_src = r#"
+        rule Detect_Api_Hash_Resolution {
+            meta:
+                severity = "high"
+            condition:
+                pe.is_pe and pe.has_api_hash and pe.has_api_hash("NtAllocateVirtualMemory")
+        }
+    "#;
+
+    let rules = raya::parser::parse_rules_from_str(rule_src).unwrap();
+    let engine = raya::engine::Engine::compile_rules(rules).unwrap();
+    let res = engine.scan_bytes(&mock_pe, "apihash_sample.exe");
+
+    assert!(res.has_matches());
+    assert_eq!(res.matches[0].rule, "Detect_Api_Hash_Resolution");
+
+    match &res.matches[0].evidence[0] {
+        raya::engine::context::MatchedEvidence::ApiHash {
+            algorithm,
+            api_name,
+            hash_value,
+            ..
+        } => {
+            assert_eq!(algorithm.to_ascii_lowercase(), "ror13");
+            assert_eq!(api_name, "NtAllocateVirtualMemory");
+            assert_eq!(*hash_value, hash);
+        }
+        other => panic!("Expected ApiHash evidence, got {:?}", other),
+    }
+}
+
+#[test]
+fn test_pe_cfg_loop_and_complexity_rule() {
+    // Loop with conditional back-edge:
+    // xor eax, eax; inc eax; cmp eax, 10; jne -7; ret
+    let code = [
+        0x31, 0xC0, // xor eax, eax
+        0xFF, 0xC0, // inc eax
+        0x83, 0xF8, 0x0A, // cmp eax, 10
+        0x75, 0xF9, // jne -7 (back to inc eax)
+        0xC3, // ret
+    ];
+
+    let mock_pe = build_mock_pe(&[(".text", 0x60000020, &code)], &[]);
+
+    let rule_src = r#"
+        rule Detect_CFG_Loop_And_Complexity {
+            condition:
+                cfg.has_loop and cfg.loop_count >= 1
+        }
+    "#;
+
+    let rules = raya::parser::parse_rules_from_str(rule_src).unwrap();
+    let engine = raya::engine::Engine::compile_rules(rules).unwrap();
+    let res = engine.scan_bytes(&mock_pe, "loop_sample.exe");
+
+    assert!(res.has_matches());
+    assert_eq!(res.matches[0].rule, "Detect_CFG_Loop_And_Complexity");
+    assert!(!res.matches[0].evidence.is_empty());
+}

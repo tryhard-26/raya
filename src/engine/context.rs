@@ -140,6 +140,24 @@ pub enum MatchedEvidence {
     RustIndicator { indicator: String },
     /// Forensic anomaly in Microsoft PE Rich header (e.g. checksum mismatch).
     RichAnomaly { detail: String },
+    /// Control Flow Graph (CFG) indicator (loop detected, complexity, flattening).
+    CfgIndicator { detail: String },
+    /// Detected direct or indirect kernel syscall invocation.
+    SyscallIndicator {
+        stub_type: String,
+        address: u64,
+        ssn: Option<u32>,
+        api_name: Option<String>,
+    },
+    /// Resolved API hash constant (e.g. ROR13, DJB2).
+    ApiHash {
+        algorithm: String,
+        api_name: String,
+        hash_value: u32,
+        offset: u64,
+    },
+    /// Authenticode digital signature indicator or anomaly.
+    CertificateIndicator { detail: String },
     /// Custom analyst or rule notification string.
     Custom(String),
 }
@@ -283,6 +301,41 @@ impl MatchedEvidence {
             }
             MatchedEvidence::RichAnomaly { detail } => {
                 format!("Rich Header anomaly: {}", detail)
+            }
+            MatchedEvidence::CfgIndicator { detail } => {
+                format!("CFG Anomaly: {}", detail)
+            }
+            MatchedEvidence::SyscallIndicator {
+                stub_type,
+                address,
+                ssn,
+                api_name,
+            } => {
+                let ssn_str = ssn
+                    .map(|s| format!(" [SSN: 0x{:02X}]", s))
+                    .unwrap_or_default();
+                let api_str = api_name
+                    .as_ref()
+                    .map(|a| format!(" -> {}", a))
+                    .unwrap_or_default();
+                format!(
+                    "{} Syscall at 0x{:x}{}{}",
+                    stub_type, address, ssn_str, api_str
+                )
+            }
+            MatchedEvidence::ApiHash {
+                algorithm,
+                api_name,
+                hash_value,
+                offset,
+            } => {
+                format!(
+                    "Resolved API Hash [{}]: {} (0x{:08X}) at 0x{:x}",
+                    algorithm, api_name, hash_value, offset
+                )
+            }
+            MatchedEvidence::CertificateIndicator { detail } => {
+                format!("Certificate / Authenticode: {}", detail)
             }
             MatchedEvidence::Custom(msg) => msg.clone(),
         }

@@ -168,7 +168,7 @@ pub fn emit_results(results: &[ScanResult], json: bool, quiet: bool, format: Opt
             } else if results.is_empty() {
                 println!(
                     "{}",
-                    "✓ Process memory scan complete: 0 matches (clean)"
+                    "[+] Process memory scan complete: 0 matches (clean)"
                         .green()
                         .bold()
                 );

@@ -9,10 +9,7 @@
 //! - Recovered stack strings with instruction VAs
 //! - Runtime introspection (.NET CLR, Golang pclntab, Rust toolchain & crates)
 
-use crate::binary::{
-    analyze_crypto, detect_format, parse_elf, parse_go, parse_macho, parse_pe, parse_rust,
-    BinaryFormat,
-};
+use crate::binary::{BinaryAnalysis, BinaryFormat, SyscallType};
 use crate::entropy::shannon_entropy;
 use crate::hash::compute_hashes;
 use colored::Colorize;
@@ -33,6 +30,12 @@ struct InspectOutput<'a> {
     hashes: HashesOutput<'a>,
     format: &'static str,
     pe: Option<PeInspectOutput>,
+    elf: Option<ElfInspectOutput>,
+    macho: Option<MachoInspectOutput>,
+    cfg: Option<CfgInspectOutput>,
+    syscalls: Vec<crate::binary::SyscallStub>,
+    api_hashes: Vec<crate::binary::ApiHashMatch>,
+    authenticode: Option<crate::binary::AuthenticodeInfo>,
     crypto: Vec<crate::binary::CryptoMatch>,
     stack_strings: Vec<crate::binary::StackString>,
     dotnet: Option<crate::binary::DotNetInfo>,
@@ -63,6 +66,37 @@ struct PeInspectOutput {
     rich_checksum_mismatch: bool,
     tls_callbacks: Vec<u64>,
     sections: Vec<SectionInspectOutput>,
+}
+
+#[derive(Serialize)]
+struct CfgInspectOutput {
+    blocks_count: usize,
+    edges_count: usize,
+    cyclomatic_complexity: usize,
+    loops_count: usize,
+    is_flattened: bool,
+}
+
+#[derive(Serialize)]
+struct ElfInspectOutput {
+    is_64: bool,
+    is_pie: bool,
+    has_nx: bool,
+    has_canary: bool,
+    relro: String,
+    entry_point: u64,
+    number_of_sections: usize,
+}
+
+#[derive(Serialize)]
+struct MachoInspectOutput {
+    is_64: bool,
+    is_fat: bool,
+    is_signed: bool,
+    cpu_type: u32,
+    number_of_commands: usize,
+    has_dangerous_entitlement: bool,
+    entitlements: Vec<String>,
 }
 
 #[derive(Serialize)]
@@ -107,37 +141,23 @@ pub fn run_inspect(args: InspectArgs) -> i32 {
     let hashes = compute_hashes(&data);
     let fuzzy = hashes.ssdeep.as_deref().unwrap_or("N/A");
     let whole_entropy = shannon_entropy(&data);
-    let format = detect_format(&data);
-
-    let pe_info = if format.is_pe() {
-        parse_pe(&data)
-    } else {
-        None
-    };
-    let elf_info = if format.is_elf() {
-        parse_elf(&data)
-    } else {
-        None
-    };
-    let macho_info = if format.is_macho() {
-        parse_macho(&data)
-    } else {
-        None
-    };
-
-    let crypto = analyze_crypto(&data);
-    let golang = parse_go(&data);
-    let rust = parse_rust(&data);
-    let dotnet = pe_info.as_ref().and_then(|p| p.dotnet.clone());
-
-    let stack_strings = if let Some(ref p) = pe_info {
-        p.stack_strings.clone()
-    } else {
-        Vec::new()
-    };
+    let analysis = BinaryAnalysis::analyze(&data);
+    let format = analysis.format;
+    let pe_info = analysis.pe.as_ref();
+    let elf_info = analysis.elf.as_ref();
+    let macho_info = analysis.macho.as_ref();
+    let crypto = &analysis.crypto;
+    let golang = analysis.golang.clone();
+    let rust = analysis.rust.clone();
+    let dotnet = analysis.dotnet.clone();
+    let stack_strings = analysis.stack_strings.clone();
+    let cfg_info = analysis.cfg.as_ref();
+    let syscalls = &analysis.syscalls;
+    let api_hashes = &analysis.api_hashes;
+    let authenticode = analysis.authenticode.as_ref();
 
     if args.json {
-        let pe_inspect = pe_info.as_ref().map(|p| PeInspectOutput {
+        let pe_inspect = pe_info.map(|p| PeInspectOutput {
             is_64: p.is_pe32_plus,
             is_dll: p.is_dll,
             machine: p.machine,
@@ -162,6 +182,34 @@ pub fn run_inspect(args: InspectArgs) -> i32 {
                 .collect(),
         });
 
+        let elf_inspect = elf_info.map(|e| ElfInspectOutput {
+            is_64: e.is_64,
+            is_pie: e.is_pie,
+            has_nx: e.has_nx,
+            has_canary: e.has_canary,
+            relro: e.relro.clone(),
+            entry_point: e.entry_point,
+            number_of_sections: e.number_of_sections,
+        });
+
+        let macho_inspect = macho_info.map(|m| MachoInspectOutput {
+            is_64: m.is_64,
+            is_fat: m.is_fat,
+            is_signed: m.is_signed,
+            cpu_type: m.cpu_type,
+            number_of_commands: m.number_of_commands,
+            has_dangerous_entitlement: m.has_dangerous_entitlement,
+            entitlements: m.entitlements.clone(),
+        });
+
+        let cfg_inspect = cfg_info.map(|c| CfgInspectOutput {
+            blocks_count: c.blocks.len(),
+            edges_count: c.edges.len(),
+            cyclomatic_complexity: c.cyclomatic_complexity,
+            loops_count: c.loops.len(),
+            is_flattened: c.is_flattened,
+        });
+
         let out = InspectOutput {
             target: &target_str,
             filesize: data.len(),
@@ -171,13 +219,19 @@ pub fn run_inspect(args: InspectArgs) -> i32 {
                 sha1: &hashes.sha1,
                 sha256: &hashes.sha256,
                 ssdeep: fuzzy,
-                imphash: pe_info.as_ref().and_then(|p| p.imphash.as_deref()),
-                rich_hash: pe_info.as_ref().and_then(|p| p.rich_hash.as_deref()),
-                exphash: pe_info.as_ref().and_then(|p| p.exphash.as_deref()),
+                imphash: pe_info.and_then(|p| p.imphash.as_deref()),
+                rich_hash: pe_info.and_then(|p| p.rich_hash.as_deref()),
+                exphash: pe_info.and_then(|p| p.exphash.as_deref()),
             },
             format: format.as_str(),
             pe: pe_inspect,
-            crypto: crypto.matches,
+            elf: elf_inspect,
+            macho: macho_inspect,
+            cfg: cfg_inspect,
+            syscalls: syscalls.clone(),
+            api_hashes: api_hashes.clone(),
+            authenticode: authenticode.cloned(),
+            crypto: crypto.matches.clone(),
             stack_strings,
             dotnet,
             golang,
@@ -244,7 +298,7 @@ pub fn run_inspect(args: InspectArgs) -> i32 {
     println!("  SHA-1:     {}", hashes.sha1.yellow());
     println!("  SHA-256:   {}", hashes.sha256.yellow());
     println!("  SSDEEP:    {}", fuzzy.dimmed());
-    if let Some(ref p) = pe_info {
+    if let Some(p) = pe_info {
         if let Some(ref imp) = p.imphash {
             println!("  Imphash:   {}", imp.cyan().bold());
         }
@@ -257,7 +311,7 @@ pub fn run_inspect(args: InspectArgs) -> i32 {
     }
 
     // PE Forensics & Sections
-    if let Some(ref p) = pe_info {
+    if let Some(p) = pe_info {
         println!("\n{}", "PORTABLE EXECUTABLE METADATA:".bold());
         println!("  Entry Point:      0x{:08X}", p.entry_point);
         println!("  Image Base:       0x{:016X}", p.image_base);
@@ -323,7 +377,51 @@ pub fn run_inspect(args: InspectArgs) -> i32 {
                 rwx_marker
             );
         }
-    } else if let Some(ref e) = elf_info {
+
+        // Authenticode Digital Signature Audit
+        if let Some(auth) = authenticode {
+            println!("\n{}", "AUTHENTICODE DIGITAL SIGNATURE AUDIT:".bold());
+            println!(
+                "  Status:         {}",
+                if auth.is_signed {
+                    "Signed".green()
+                } else {
+                    "Unsigned".yellow()
+                }
+            );
+            if let Some(ref cn) = auth.subject_cn {
+                println!("  Subject CN:     {}", cn.cyan());
+            }
+            if let Some(ref org) = auth.organization {
+                println!("  Organization:   {}", org);
+            }
+            if let Some(ref issuer) = auth.issuer_cn {
+                println!("  Issuer CN:      {}", issuer.dimmed());
+            }
+            if auth.is_self_signed {
+                println!(
+                    "  Self-Signed:    {}",
+                    "WARNING: Self-Signed Certificate".yellow().bold()
+                );
+            }
+            if auth.has_signature_overlay {
+                println!(
+                    "  Overlay Audit:  {}",
+                    format!(
+                        "ANOMALY: Trailing Signature Overlay ({} bytes beyond PE boundary)",
+                        auth.overlay_size
+                    )
+                    .red()
+                    .bold()
+                );
+            } else {
+                println!(
+                    "  Overlay Audit:  {}",
+                    "Clean (No trailing overlay detected)".green()
+                );
+            }
+        }
+    } else if let Some(e) = elf_info {
         println!("\n{}", "ELF SECTIONS:".bold());
         for sec in &e.sections {
             let perms = format!(
@@ -339,7 +437,41 @@ pub fn run_inspect(args: InspectArgs) -> i32 {
                 perms.dimmed()
             );
         }
-    } else if let Some(ref m) = macho_info {
+
+        println!("\n{}", "ELF COMPILER HARDENING & MITIGATIONS:".bold());
+        println!(
+            "  Non-Executable Stack (NX):  {}",
+            if e.has_nx {
+                "Enabled".green()
+            } else {
+                "DISABLED".red().bold()
+            }
+        );
+        println!(
+            "  Stack Canary Protection:    {}",
+            if e.has_canary {
+                "Enabled".green()
+            } else {
+                "DISABLED".yellow()
+            }
+        );
+        println!(
+            "  RELRO Hardening:            {}",
+            match e.relro.as_str() {
+                "Full" => "Full RELRO".green().bold(),
+                "Partial" => "Partial RELRO".yellow(),
+                _ => "None (No RELRO)".red().bold(),
+            }
+        );
+        println!(
+            "  Position Independent (PIE): {}",
+            if e.is_pie {
+                "Enabled (PIE)".green()
+            } else {
+                "Disabled".dimmed()
+            }
+        );
+    } else if let Some(m) = macho_info {
         println!("\n{}", "MACH-O SEGMENTS & COMMANDS:".bold());
         println!("  CPU Type: {}", m.cpu_type);
         println!("  Commands: {}", m.number_of_commands);
@@ -351,6 +483,118 @@ pub fn run_inspect(args: InspectArgs) -> i32 {
                 seg.sections.len()
             );
         }
+
+        println!("\n{}", "MACH-O SECURITY & ENTITLEMENTS:".bold());
+        println!(
+            "  Code Signed:                {}",
+            if m.is_signed {
+                "Signed".green()
+            } else {
+                "Unsigned".yellow()
+            }
+        );
+        println!(
+            "  Dangerous Entitlements:     {}",
+            if m.has_dangerous_entitlement {
+                "DETECTED (e.g. get-task-allow)".red().bold()
+            } else {
+                "None".green()
+            }
+        );
+        if !m.entitlements.is_empty() {
+            println!("  Entitlements ({}):", m.entitlements.len());
+            for ent in &m.entitlements {
+                println!("    [-] {}", ent.dimmed());
+            }
+        }
+    }
+
+    // Direct / Indirect Syscall Hunter
+    if !syscalls.is_empty() {
+        println!("\n{}", "KERNEL EVASION & SYSCALL HUNTER:".bold().red());
+        println!(
+            "  {:<20} {:<12} {:<8} {:<28} Disassembly",
+            "Type", "Address", "SSN", "Estimated API"
+        );
+        println!(
+            "  {}",
+            "--------------------------------------------------------------------------------"
+                .dimmed()
+        );
+        for s in syscalls {
+            let type_str = match s.stub_type {
+                SyscallType::Direct => "DIRECT SYSCALL".red().bold(),
+                SyscallType::Indirect => "INDIRECT TRAMPOLINE".magenta().bold(),
+                SyscallType::LegacyInterrupt => "LEGACY INT 0x2E".yellow().bold(),
+            };
+            let ssn_str = s
+                .ssn
+                .map(|n| format!("0x{:04X}", n))
+                .unwrap_or_else(|| "-".to_string());
+            let api_str = s.estimated_api.as_deref().unwrap_or("Unknown").cyan();
+            println!(
+                "  {:<20} 0x{:08X}   {:<8} {:<28} {}",
+                type_str,
+                s.address,
+                ssn_str,
+                api_str,
+                s.disassembly.dimmed()
+            );
+        }
+    }
+
+    // Control Flow Graph (CFG) Metrics
+    if let Some(cfg) = cfg_info {
+        if !cfg.blocks.is_empty() {
+            println!("\n{}", "CONTROL FLOW GRAPH (CFG) METRICS:".bold());
+            println!("  Basic Blocks:          {}", cfg.blocks.len());
+            println!("  Directed Edges:        {}", cfg.edges.len());
+            let cc_label = if cfg.cyclomatic_complexity >= 40 {
+                "EXTREME: Suspected Obfuscation".red().bold()
+            } else if cfg.cyclomatic_complexity >= 20 {
+                "HIGH: Complex Logic".yellow().bold()
+            } else {
+                "NORMAL".green()
+            };
+            println!(
+                "  Cyclomatic Complexity: {} ({})",
+                cfg.cyclomatic_complexity, cc_label
+            );
+            println!("  Natural Loops:         {}", cfg.loops.len());
+            if cfg.is_flattened {
+                println!(
+                    "  CFF Obfuscation:       {}",
+                    "DETECTED (Dispatcher / Switch State-Machine Pattern)"
+                        .red()
+                        .bold()
+                );
+            }
+        }
+    }
+
+    // Micro-Emulation API Hash Hunter
+    if !api_hashes.is_empty() {
+        println!(
+            "\n{}",
+            "RESOLVED API HASHES (MICRO-EMULATION):".bold().cyan()
+        );
+        println!(
+            "  {:<12} {:<12} {:<32} Offset",
+            "Algorithm", "Hash Value", "Resolved Win32 / NT API"
+        );
+        println!(
+            "  {}",
+            "----------------------------------------------------------------------".dimmed()
+        );
+        for h in api_hashes {
+            println!(
+                "  {:<12} 0x{:08X}   {:<32} 0x{:08X}",
+                h.algorithm.yellow(),
+                h.hash_value,
+                h.api_name.green().bold(),
+                h.offset
+            );
+        }
     }
 
     // Cryptographic Primitives
@@ -358,7 +602,7 @@ pub fn run_inspect(args: InspectArgs) -> i32 {
         println!("\n{}", "CRYPTOGRAPHIC CONSTANTS DETECTED:".bold().magenta());
         for m in &crypto.matches {
             println!(
-                "  ✓ [{}] {} at offset 0x{:X}",
+                "  [-] [{}] {} at offset 0x{:X}",
                 m.algorithm.bold(),
                 m.description,
                 m.offset
@@ -371,7 +615,7 @@ pub fn run_inspect(args: InspectArgs) -> i32 {
         println!("\n{}", "RECOVERED STACK STRINGS:".bold().green());
         for s in stack_strings.iter().take(12) {
             println!(
-                "  ✓ \"{}\" (VA: 0x{:X}{})",
+                "  [-] \"{}\" (VA: 0x{:X}{})",
                 s.value.bold(),
                 s.offset,
                 if s.is_wide { ", UTF-16LE" } else { "" }
@@ -398,7 +642,7 @@ pub fn run_inspect(args: InspectArgs) -> i32 {
         );
         if !dn.user_strings.is_empty() {
             for us in dn.user_strings.iter().take(5) {
-                println!("    • \"{}\"", us.dimmed());
+                println!("    [-] \"{}\"", us.dimmed());
             }
         }
     }

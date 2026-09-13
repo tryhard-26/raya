@@ -293,6 +293,32 @@ impl Engine {
                         MatchedEvidence::RichAnomaly { detail } => {
                             format!("rich_anomaly:{}", detail)
                         }
+                        MatchedEvidence::CfgIndicator { detail } => {
+                            format!("cfg:{}", detail)
+                        }
+                        MatchedEvidence::SyscallIndicator {
+                            stub_type,
+                            address,
+                            api_name,
+                            ..
+                        } => {
+                            let api = api_name.as_deref().unwrap_or("unknown");
+                            format!("syscall:{}:{}@0x{:x}", stub_type, api, address)
+                        }
+                        MatchedEvidence::ApiHash {
+                            algorithm,
+                            api_name,
+                            hash_value,
+                            offset,
+                        } => {
+                            format!(
+                                "api_hash:{}:{}#0x{:08X}@0x{:x}",
+                                algorithm, api_name, hash_value, offset
+                            )
+                        }
+                        MatchedEvidence::CertificateIndicator { detail } => {
+                            format!("cert:{}", detail)
+                        }
                         MatchedEvidence::Custom(msg) => msg.clone(),
                     })
                     .collect();
