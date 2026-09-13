@@ -8,6 +8,9 @@
 //! - [`to_sarif`]: Serializer for **OASIS SARIF v2.1.0**, directly ingestible by GitHub Code Scanning and security dashboards.
 //! - [`to_stix`]: Serializer for **OASIS STIX 2.1**, converting detections into structured threat intelligence bundles.
 
+pub mod html;
+pub use html::to_html;
+
 use crate::ast::Severity;
 use crate::binary::BinaryAnalysis;
 use crate::engine::context::MatchedEvidence;

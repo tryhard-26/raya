@@ -67,6 +67,10 @@ pub struct BinaryAnalysis {
     pub api_hashes: Vec<ApiHashMatch>,
     /// Digital signature and Authenticode metadata, if signed.
     pub authenticode: Option<AuthenticodeInfo>,
+    /// Automatically deobfuscated plaintext strings and XOR buffers.
+    pub deobfuscated_strings: Vec<crate::deobfuscate::DecryptedPayload>,
+    /// Extracted C2 configurations and threat intelligence indicators.
+    pub c2_configs: Vec<crate::extractor::ExtractedConfig>,
 }
 
 impl BinaryAnalysis {
@@ -243,6 +247,9 @@ impl BinaryAnalysis {
             }
         }
 
+        let deobfuscated_strings = crate::deobfuscate::hunt_deobfuscated_strings(data);
+        let c2_configs = crate::extractor::extract_all_configs(data);
+
         Self {
             format,
             pe,
@@ -257,6 +264,8 @@ impl BinaryAnalysis {
             syscalls,
             api_hashes,
             authenticode,
+            deobfuscated_strings,
+            c2_configs,
         }
     }
 }

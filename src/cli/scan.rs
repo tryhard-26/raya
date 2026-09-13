@@ -2,7 +2,7 @@ use crate::ast::Severity;
 use crate::cli::compile::load_or_compile_rules;
 use crate::cli::process::scan_process_memory;
 use crate::engine::Engine;
-use crate::report::{to_sarif, to_stix, ScanResult};
+use crate::report::{to_html, to_sarif, to_stix, ScanResult};
 use colored::Colorize;
 use rayon::prelude::*;
 use std::io::Read;
@@ -167,6 +167,10 @@ fn render_multi_results(
     let fmt = format.unwrap_or(if json { "json" } else { "text" });
 
     match fmt {
+        "html" => {
+            let html_str = to_html(results);
+            println!("{}", html_str);
+        }
         "sarif" => match to_sarif(results) {
             Ok(s) => println!("{}", s),
             Err(e) => {
@@ -259,6 +263,10 @@ fn render_single_result(result: &ScanResult, json: bool, quiet: bool, format: Op
                 );
                 return 2;
             }
+        }
+        "html" => {
+            let html_str = to_html(std::slice::from_ref(result));
+            println!("{}", html_str);
         }
         "sarif" => match to_sarif(std::slice::from_ref(result)) {
             Ok(s) => println!("{}", s),
@@ -386,6 +394,10 @@ fn scan_directory(
     let fmt = format.unwrap_or(if json { "json" } else { "text" });
 
     match fmt {
+        "html" => {
+            let html_str = to_html(&matched_results);
+            println!("{}", html_str);
+        }
         "sarif" => match to_sarif(&matched_results) {
             Ok(s) => println!("{}", s),
             Err(e) => {

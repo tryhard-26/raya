@@ -42,6 +42,8 @@ struct InspectOutput<'a> {
     dotnet: Option<crate::binary::DotNetInfo>,
     golang: Option<crate::binary::GoInfo>,
     rust: Option<crate::binary::RustInfo>,
+    deobfuscated_strings: Vec<crate::deobfuscate::DecryptedPayload>,
+    c2_configs: Vec<crate::extractor::ExtractedConfig>,
 }
 
 #[derive(Serialize)]
@@ -254,6 +256,8 @@ pub fn inspect_buffer(target_str: &str, data: &[u8], json: bool) -> i32 {
             dotnet,
             golang,
             rust,
+            deobfuscated_strings: analysis.deobfuscated_strings.clone(),
+            c2_configs: analysis.c2_configs.clone(),
         };
 
         if let Ok(serialized) = serde_json::to_string_pretty(&out) {
@@ -641,6 +645,51 @@ pub fn inspect_buffer(target_str: &str, data: &[u8], json: bool) -> i32 {
         }
         if stack_strings.len() > 12 {
             println!("  ... and {} more stack strings", stack_strings.len() - 12);
+        }
+    }
+
+    // Automated XOR / Rolling Key Deobfuscation
+    if !analysis.deobfuscated_strings.is_empty() {
+        println!(
+            "\n{}",
+            "RECOVERED DEOBFUSCATED STRINGS / XOR BUFFERS:"
+                .bold()
+                .cyan()
+        );
+        for s in analysis.deobfuscated_strings.iter().take(10) {
+            println!(
+                "  [-] \"{}\" ({} | Key: {} at offset 0x{:X})",
+                s.plaintext.bold(),
+                s.algorithm.dimmed(),
+                s.key_repr.yellow(),
+                s.offset
+            );
+        }
+        if analysis.deobfuscated_strings.len() > 10 {
+            println!(
+                "  ... and {} more deobfuscated strings",
+                analysis.deobfuscated_strings.len() - 10
+            );
+        }
+    }
+
+    // Extracted C2 Configurations
+    if !analysis.c2_configs.is_empty() {
+        println!(
+            "\n{}",
+            "EXTRACTED C2 CONFIGURATIONS & THREAT INTEL:".bold().cyan()
+        );
+        for cfg in &analysis.c2_configs {
+            println!("  [+] {}", cfg.family.red().bold());
+            for c2 in &cfg.c2_servers {
+                println!("      [-] C2: {}", c2.green().bold());
+            }
+            for k in &cfg.crypto_keys {
+                println!("      [-] Key: {}", k.yellow());
+            }
+            for (k, v) in &cfg.extra {
+                println!("      [-] {}: {}", k, v.bold());
+            }
         }
     }
 

@@ -1,11 +1,17 @@
 pub mod bench;
+pub mod carve;
 pub mod check;
 pub mod compile;
+pub mod config;
 pub mod convert;
+pub mod diff;
 pub mod inspect;
 pub mod process;
 pub mod scan;
+pub mod sync;
 pub mod test;
+pub mod tui;
+pub mod watch;
 
 use clap::{Parser, Subcommand};
 use std::path::PathBuf;
@@ -138,8 +144,115 @@ pub enum Commands {
         iterations: usize,
     },
 
+    /// Compare and diff two binaries using CFG graph isomorphism and similarity scoring
+    Diff {
+        /// Primary binary file (Target A)
+        #[arg(value_name = "FILE_A")]
+        file_a: PathBuf,
+
+        /// Comparison binary file (Target B)
+        #[arg(value_name = "FILE_B")]
+        file_b: PathBuf,
+
+        /// Output results in JSON format
+        #[arg(long)]
+        json: bool,
+    },
+
+    /// Extract in-memory C2 configurations (Cobalt Strike, WannaCry, Mirai, RedLine)
+    Config {
+        /// Target binary file or archive to extract configuration from
+        #[arg(value_name = "TARGET")]
+        target: PathBuf,
+
+        /// Output results in JSON format
+        #[arg(long)]
+        json: bool,
+
+        /// Optional decryption password for password-protected archives
+        #[arg(long, value_name = "PASSWORD")]
+        password: Option<String>,
+    },
+
+    /// Carve embedded executables, ELF binaries, archives, and overlay payloads
+    Carve {
+        /// Target binary file to carve artifacts from
+        #[arg(value_name = "TARGET")]
+        target: PathBuf,
+
+        /// Output directory to extract carved artifacts to
+        #[arg(short, long, value_name = "OUTPUT_DIR")]
+        output: Option<PathBuf>,
+
+        /// Output results in JSON format
+        #[arg(long)]
+        json: bool,
+    },
+
+    /// Real-time directory watchdog and automatic malware quarantine daemon
+    Watch {
+        /// Target directory to monitor for newly dropped files
+        #[arg(value_name = "DIR")]
+        target: PathBuf,
+
+        /// Path to rule file, directory, or precompiled .rc rule cache (default: ./rules)
+        #[arg(short = 'R', long, default_value = "./rules")]
+        rules: PathBuf,
+
+        /// Quarantine directory to isolate detected threats
+        #[arg(short, long, value_name = "QUARANTINE_DIR")]
+        quarantine: Option<PathBuf>,
+
+        /// Polling interval in milliseconds
+        #[arg(long, default_value_t = 500)]
+        interval: u64,
+
+        /// Execute a single pass scan and exit immediately
+        #[arg(long)]
+        once: bool,
+
+        /// Optional decryption password for password-protected archives
+        #[arg(long, value_name = "PASSWORD")]
+        password: Option<String>,
+    },
+
+    /// Threat intelligence feed management and rule synchronization
+    Rules {
+        #[command(subcommand)]
+        command: RulesCommands,
+    },
+
+    /// Launch the interactive terminal forensic triage dashboard
+    Tui {
+        /// Target binary file to inspect interactively
+        #[arg(value_name = "TARGET")]
+        target: PathBuf,
+
+        /// Optional decryption password for password-protected archives
+        #[arg(long, value_name = "PASSWORD")]
+        password: Option<String>,
+    },
+
     /// Display version and build information
     Version,
+}
+
+#[derive(Subcommand)]
+pub enum RulesCommands {
+    /// Synchronize and transpile rules from threat intelligence feeds
+    Sync {
+        /// Feed name preset (signature-base, yara-rules) or custom URL/path
+        #[arg(long, default_value = "signature-base")]
+        feed: String,
+
+        /// Output directory for synchronized rules
+        #[arg(short, long, default_value = "./rules/community")]
+        output: PathBuf,
+
+        /// Precompile synchronized rules into rules.rcache binary cache
+        #[arg(long, default_value_t = true)]
+        compile: bool,
+    },
 }
 
 pub fn run_cli() -> i32 {
@@ -195,6 +308,60 @@ pub fn run_cli() -> i32 {
             rules,
             iterations,
         }),
+        Commands::Diff {
+            file_a,
+            file_b,
+            json,
+        } => diff::run_diff(diff::DiffArgs {
+            file_a,
+            file_b,
+            json,
+        }),
+        Commands::Config {
+            target,
+            json,
+            password,
+        } => config::run_config(config::ConfigArgs {
+            target,
+            json,
+            password,
+        }),
+        Commands::Carve {
+            target,
+            output,
+            json,
+        } => carve::run_carve(carve::CarveArgs {
+            target,
+            output_dir: output,
+            json,
+        }),
+        Commands::Watch {
+            target,
+            rules,
+            quarantine,
+            interval,
+            once,
+            password,
+        } => watch::run_watch(watch::WatchArgs {
+            watch_dir: target,
+            rules,
+            quarantine,
+            interval_ms: interval,
+            once,
+            password,
+        }),
+        Commands::Rules { command } => match command {
+            RulesCommands::Sync {
+                feed,
+                output,
+                compile,
+            } => sync::run_sync_cli(sync::SyncArgs {
+                feed,
+                output,
+                compile,
+            }),
+        },
+        Commands::Tui { target, password } => tui::run_tui_cli(tui::TuiArgs { target, password }),
         Commands::Version => {
             println!("raya {}", env!("CARGO_PKG_VERSION"));
             println!("Architecture: {}", std::env::consts::ARCH);

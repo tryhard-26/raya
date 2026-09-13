@@ -116,13 +116,20 @@
 pub mod archive;
 pub mod ast;
 pub mod binary;
+pub mod carve;
 pub mod cli;
+pub mod deobfuscate;
+pub mod diff;
 pub mod engine;
 pub mod entropy;
+pub mod extractor;
 pub mod hash;
 pub mod parser;
 pub mod report;
+pub mod sync;
 pub mod test_runner;
+pub mod tui;
+pub mod watch;
 
 /// Convenient re-exports of common Raya types and functions.
 ///
