@@ -77,6 +77,10 @@ pub enum Commands {
         /// Output results in JSON format
         #[arg(long)]
         json: bool,
+
+        /// Optional decryption password for password-protected archives (defaults: infected, malware, etc.)
+        #[arg(long, value_name = "PASSWORD")]
+        password: Option<String>,
     },
 
     /// Transpile legacy YARA rules (.yar / .yara) into native Raya detection rules
@@ -168,9 +172,15 @@ pub fn run_cli() -> i32 {
         Commands::Compile { rules, output } => {
             compile::run_compile(compile::CompileArgs { rules, output })
         }
-        Commands::Inspect { target, json } => {
-            inspect::run_inspect(inspect::InspectArgs { target, json })
-        }
+        Commands::Inspect {
+            target,
+            json,
+            password,
+        } => inspect::run_inspect(inspect::InspectArgs {
+            target,
+            json,
+            password,
+        }),
         Commands::Convert { input, output } => {
             convert::run_convert(convert::ConvertArgs { input, output })
         }

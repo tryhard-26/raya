@@ -1039,6 +1039,42 @@ pub fn parse_pe(data: &[u8]) -> Option<PeInfo> {
         }
     }
 
+    if primary_cfg.is_none() && entry_point > 0 {
+        if let Some(ep_offset) = rva_to_offset(entry_point as u32) {
+            if ep_offset < data.len() {
+                let end = (ep_offset + 512 * 1024).min(data.len());
+                let ep_bytes = &data[ep_offset..end];
+                let bitness = if is_pe32_plus { 64 } else { 32 };
+                let ep_va = image_base + entry_point;
+                let mut decoder = iced_x86::Decoder::with_ip(
+                    bitness,
+                    ep_bytes,
+                    ep_va,
+                    iced_x86::DecoderOptions::NONE,
+                );
+                let mut instructions = Vec::new();
+                let mut instr = iced_x86::Instruction::default();
+                while decoder.can_decode() && instructions.len() < 32768 {
+                    decoder.decode_out(&mut instr);
+                    if !instr.is_invalid() {
+                        instructions.push(instr);
+                    }
+                }
+                if !instructions.is_empty() {
+                    syscalls.extend(crate::binary::syscall::detect_syscall_stubs(&instructions));
+                    api_hashes.extend(crate::binary::api_hash::scan_api_hashes(
+                        ep_bytes,
+                        &instructions,
+                        &api_db,
+                    ));
+                    primary_cfg = Some(crate::binary::cfg::ControlFlowGraph::from_instructions(
+                        &instructions,
+                    ));
+                }
+            }
+        }
+    }
+
     Some(PeInfo {
         is_pe: true,
         is_pe32_plus,

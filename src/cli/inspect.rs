@@ -20,6 +20,7 @@ use std::path::PathBuf;
 pub struct InspectArgs {
     pub target: PathBuf,
     pub json: bool,
+    pub password: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -138,10 +139,27 @@ pub fn run_inspect(args: InspectArgs) -> i32 {
     };
 
     let target_str = args.target.display().to_string();
-    let hashes = compute_hashes(&data);
+
+    if crate::archive::is_zip(&data) {
+        if let Ok(entries) = crate::archive::extract_zip_bytes(&data, args.password.as_deref()) {
+            if !entries.is_empty() {
+                for entry in entries {
+                    let label = format!("{} -> {}", target_str, entry.name);
+                    inspect_buffer(&label, &entry.data, args.json);
+                }
+                return 0;
+            }
+        }
+    }
+
+    inspect_buffer(&target_str, &data, args.json)
+}
+
+pub fn inspect_buffer(target_str: &str, data: &[u8], json: bool) -> i32 {
+    let hashes = compute_hashes(data);
     let fuzzy = hashes.ssdeep.as_deref().unwrap_or("N/A");
-    let whole_entropy = shannon_entropy(&data);
-    let analysis = BinaryAnalysis::analyze(&data);
+    let whole_entropy = shannon_entropy(data);
+    let analysis = BinaryAnalysis::analyze(data);
     let format = analysis.format;
     let pe_info = analysis.pe.as_ref();
     let elf_info = analysis.elf.as_ref();
@@ -156,7 +174,7 @@ pub fn run_inspect(args: InspectArgs) -> i32 {
     let api_hashes = &analysis.api_hashes;
     let authenticode = analysis.authenticode.as_ref();
 
-    if args.json {
+    if json {
         let pe_inspect = pe_info.map(|p| PeInspectOutput {
             is_64: p.is_pe32_plus,
             is_dll: p.is_dll,
@@ -211,7 +229,7 @@ pub fn run_inspect(args: InspectArgs) -> i32 {
         });
 
         let out = InspectOutput {
-            target: &target_str,
+            target: target_str,
             filesize: data.len(),
             entropy: whole_entropy,
             hashes: HashesOutput {

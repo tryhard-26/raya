@@ -118,13 +118,130 @@ impl BinaryAnalysis {
             }
         }
 
-        let cfg = pe.as_ref().and_then(|p| p.cfg.clone());
-        let syscalls = pe.as_ref().map(|p| p.syscalls.clone()).unwrap_or_default();
-        let api_hashes = pe
+        let mut cfg = pe.as_ref().and_then(|p| p.cfg.clone());
+        let mut syscalls = pe.as_ref().map(|p| p.syscalls.clone()).unwrap_or_default();
+        let mut api_hashes = pe
             .as_ref()
             .map(|p| p.api_hashes.clone())
             .unwrap_or_default();
         let authenticode = pe.as_ref().and_then(|p| p.authenticode.clone());
+
+        if cfg.is_none() {
+            let api_db = crate::binary::api_hash::ApiHashDatabase::new();
+            if let Some(ref elf_info) = elf {
+                let bitness = if elf_info.is_64 { 64 } else { 32 };
+                for sec in &elf_info.sections {
+                    if sec.is_executable && sec.size > 0 && (sec.offset as usize) < data.len() {
+                        let start = sec.offset as usize;
+                        let end = (start + (sec.size as usize).min(512 * 1024)).min(data.len());
+                        let sec_bytes = &data[start..end];
+                        let mut decoder = iced_x86::Decoder::with_ip(
+                            bitness,
+                            sec_bytes,
+                            sec.addr,
+                            iced_x86::DecoderOptions::NONE,
+                        );
+                        let mut instructions = Vec::new();
+                        let mut instr = iced_x86::Instruction::default();
+                        while decoder.can_decode() && instructions.len() < 32768 {
+                            decoder.decode_out(&mut instr);
+                            if !instr.is_invalid() {
+                                instructions.push(instr);
+                            }
+                        }
+                        if !instructions.is_empty() {
+                            syscalls.extend(crate::binary::syscall::detect_syscall_stubs(
+                                &instructions,
+                            ));
+                            api_hashes.extend(crate::binary::api_hash::scan_api_hashes(
+                                sec_bytes,
+                                &instructions,
+                                &api_db,
+                            ));
+                            if cfg.is_none() {
+                                cfg =
+                                    Some(crate::binary::cfg::ControlFlowGraph::from_instructions(
+                                        &instructions,
+                                    ));
+                            }
+                        }
+                    }
+                }
+            } else if let Some(ref macho_info) = macho {
+                let bitness = if macho_info.is_64 { 64 } else { 32 };
+                for seg in &macho_info.segments {
+                    for sec in &seg.sections {
+                        if sec.is_executable && sec.size > 0 && (sec.offset as usize) < data.len() {
+                            let start = sec.offset as usize;
+                            let end = (start + (sec.size as usize).min(512 * 1024)).min(data.len());
+                            let sec_bytes = &data[start..end];
+                            let mut decoder = iced_x86::Decoder::with_ip(
+                                bitness,
+                                sec_bytes,
+                                sec.addr,
+                                iced_x86::DecoderOptions::NONE,
+                            );
+                            let mut instructions = Vec::new();
+                            let mut instr = iced_x86::Instruction::default();
+                            while decoder.can_decode() && instructions.len() < 32768 {
+                                decoder.decode_out(&mut instr);
+                                if !instr.is_invalid() {
+                                    instructions.push(instr);
+                                }
+                            }
+                            if !instructions.is_empty() {
+                                syscalls.extend(crate::binary::syscall::detect_syscall_stubs(
+                                    &instructions,
+                                ));
+                                api_hashes.extend(crate::binary::api_hash::scan_api_hashes(
+                                    sec_bytes,
+                                    &instructions,
+                                    &api_db,
+                                ));
+                                if cfg.is_none() {
+                                    cfg = Some(
+                                        crate::binary::cfg::ControlFlowGraph::from_instructions(
+                                            &instructions,
+                                        ),
+                                    );
+                                }
+                            }
+                        }
+                    }
+                }
+            } else if format == BinaryFormat::Raw && data.len() >= 16 {
+                for &bitness in &[64, 32] {
+                    let end = data.len().min(64 * 1024);
+                    let mut decoder = iced_x86::Decoder::with_ip(
+                        bitness,
+                        &data[..end],
+                        0x1000,
+                        iced_x86::DecoderOptions::NONE,
+                    );
+                    let mut instructions = Vec::new();
+                    let mut instr = iced_x86::Instruction::default();
+                    while decoder.can_decode() && instructions.len() < 8192 {
+                        decoder.decode_out(&mut instr);
+                        if !instr.is_invalid() {
+                            instructions.push(instr);
+                        }
+                    }
+                    if instructions.len() >= 4 {
+                        syscalls
+                            .extend(crate::binary::syscall::detect_syscall_stubs(&instructions));
+                        api_hashes.extend(crate::binary::api_hash::scan_api_hashes(
+                            &data[..end],
+                            &instructions,
+                            &api_db,
+                        ));
+                        cfg = Some(crate::binary::cfg::ControlFlowGraph::from_instructions(
+                            &instructions,
+                        ));
+                        break;
+                    }
+                }
+            }
+        }
 
         Self {
             format,
