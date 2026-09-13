@@ -90,11 +90,20 @@ pub fn run_compile(args: CompileArgs) -> i32 {
 
 pub fn load_or_compile_rules(rules_path: &Path) -> Result<Engine, String> {
     if rules_path.is_file() {
-        if let Some(ext) = rules_path.extension() {
-            if ext == "rc" || ext == "bin" {
-                return Engine::load_compiled_rules(rules_path)
-                    .map_err(|e| format!("Failed to load precompiled rules: {}", e));
-            }
+        let is_binary_ext = rules_path
+            .extension()
+            .and_then(|ext| ext.to_str())
+            .map(|ext| matches!(ext, "rc" | "bin" | "raya_bin" | "rcache"))
+            .unwrap_or(false);
+
+        if is_binary_ext {
+            return Engine::load_compiled_rules(rules_path)
+                .map_err(|e| format!("Failed to load precompiled rules: {}", e));
+        }
+
+        // Check if file is precompiled binary rules
+        if let Ok(engine) = Engine::load_compiled_rules(rules_path) {
+            return Ok(engine);
         }
     }
 
