@@ -49,9 +49,13 @@ pub enum Commands {
         #[arg(long)]
         json: bool,
 
-        /// Output format: text, json, sarif, or stix
+        /// Output format: text, json, sarif, stix, or html
         #[arg(long, value_name = "FORMAT")]
         format: Option<String>,
+
+        /// Output file path (defaults to stdout)
+        #[arg(short = 'o', long, value_name = "FILE")]
+        output: Option<PathBuf>,
 
         /// Scan live process virtual memory by PID
         #[arg(long, value_name = "PID")]
@@ -265,6 +269,7 @@ pub fn run_cli() -> i32 {
             recursive,
             json,
             format,
+            output,
             pid,
             quiet,
             tag,
@@ -276,6 +281,7 @@ pub fn run_cli() -> i32 {
             recursive,
             json,
             format,
+            output,
             pid,
             quiet,
             tag,

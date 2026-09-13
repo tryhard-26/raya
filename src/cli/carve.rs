@@ -28,6 +28,23 @@ pub fn run_carve(args: CarveArgs) -> i32 {
         }
     };
 
+    let (data, target_label) = if crate::archive::is_zip(&data) {
+        if let Ok(entries) = crate::archive::extract_zip_bytes(&data, None) {
+            if let Some(first) = entries.into_iter().next() {
+                (
+                    first.data,
+                    format!("{} -> {}", args.target.display(), first.name),
+                )
+            } else {
+                (data, args.target.display().to_string())
+            }
+        } else {
+            (data, args.target.display().to_string())
+        }
+    } else {
+        (data, args.target.display().to_string())
+    };
+
     let artifacts = carve_artifacts(&data);
 
     if let Some(ref out_dir) = args.output_dir {
@@ -65,7 +82,7 @@ pub fn run_carve(args: CarveArgs) -> i32 {
     println!(
         "{} {}",
         "RAYA ARTIFACT & OVERLAY CARVER:".cyan().bold(),
-        args.target.display().to_string().bold()
+        target_label.yellow().bold()
     );
     println!("{}", "=".repeat(80).cyan());
 

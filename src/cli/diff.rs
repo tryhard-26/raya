@@ -41,6 +41,40 @@ pub fn run_diff(args: DiffArgs) -> i32 {
         }
     };
 
+    let (data_a, name_a) = if crate::archive::is_zip(&data_a) {
+        if let Ok(entries) = crate::archive::extract_zip_bytes(&data_a, None) {
+            if let Some(first) = entries.into_iter().next() {
+                (
+                    first.data,
+                    format!("{} -> {}", args.file_a.display(), first.name),
+                )
+            } else {
+                (data_a, args.file_a.display().to_string())
+            }
+        } else {
+            (data_a, args.file_a.display().to_string())
+        }
+    } else {
+        (data_a, args.file_a.display().to_string())
+    };
+
+    let (data_b, name_b) = if crate::archive::is_zip(&data_b) {
+        if let Ok(entries) = crate::archive::extract_zip_bytes(&data_b, None) {
+            if let Some(first) = entries.into_iter().next() {
+                (
+                    first.data,
+                    format!("{} -> {}", args.file_b.display(), first.name),
+                )
+            } else {
+                (data_b, args.file_b.display().to_string())
+            }
+        } else {
+            (data_b, args.file_b.display().to_string())
+        }
+    } else {
+        (data_b, args.file_b.display().to_string())
+    };
+
     let report = diff_binaries(&data_a, &data_b);
 
     if args.json {
@@ -53,9 +87,9 @@ pub fn run_diff(args: DiffArgs) -> i32 {
     println!("{}", "=".repeat(80).cyan());
     println!(
         "{} {} vs {}",
-        "RAYA BINARY & CFG PATCH DIFF REPORT:".cyan().bold(),
-        args.file_a.display().to_string().bold(),
-        args.file_b.display().to_string().bold()
+        "RAYA BINARY & CFG PATCH DIFF REPORT:".bold().cyan(),
+        name_a.yellow(),
+        name_b.yellow()
     );
     println!("{}", "=".repeat(80).cyan());
 

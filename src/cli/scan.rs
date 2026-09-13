@@ -20,7 +20,25 @@ pub struct ScanArgs {
     pub threads: Option<usize>,
     pub pid: Option<u32>,
     pub format: Option<String>,
+    pub output: Option<PathBuf>,
     pub password: Option<String>,
+}
+
+fn emit_formatted(content: &str, output: Option<&PathBuf>) {
+    if let Some(out_path) = output {
+        if let Err(e) = std::fs::write(out_path, content) {
+            eprintln!(
+                "{}: Failed to write output file {}: {}",
+                "ERROR".red().bold(),
+                out_path.display(),
+                e
+            );
+        } else {
+            eprintln!("[+] Report successfully written to {}", out_path.display());
+        }
+    } else {
+        println!("{}", content);
+    }
 }
 
 pub fn run_scan(args: ScanArgs) -> i32 {
@@ -66,11 +84,23 @@ pub fn run_scan(args: ScanArgs) -> i32 {
     // Check target: stdin vs file vs directory
     let target = match args.target {
         Some(ref t) if t == Path::new("-") => {
-            return scan_stdin(&engine, args.json, args.quiet, args.format.as_deref());
+            return scan_stdin(
+                &engine,
+                args.json,
+                args.quiet,
+                args.format.as_deref(),
+                args.output.as_ref(),
+            );
         }
         Some(t) => t,
         None => {
-            return scan_stdin(&engine, args.json, args.quiet, args.format.as_deref());
+            return scan_stdin(
+                &engine,
+                args.json,
+                args.quiet,
+                args.format.as_deref(),
+                args.output.as_ref(),
+            );
         }
     };
 
@@ -81,6 +111,7 @@ pub fn run_scan(args: ScanArgs) -> i32 {
             args.json,
             args.quiet,
             args.format.as_deref(),
+            args.output.as_ref(),
             args.password.as_deref(),
         )
     } else if target.is_dir() {
@@ -91,6 +122,7 @@ pub fn run_scan(args: ScanArgs) -> i32 {
             args.json,
             args.quiet,
             args.format.as_deref(),
+            args.output.as_ref(),
             args.password.as_deref(),
         )
     } else {
@@ -103,14 +135,20 @@ pub fn run_scan(args: ScanArgs) -> i32 {
     }
 }
 
-fn scan_stdin(engine: &Engine, json: bool, quiet: bool, format: Option<&str>) -> i32 {
+fn scan_stdin(
+    engine: &Engine,
+    json: bool,
+    quiet: bool,
+    format: Option<&str>,
+    output: Option<&PathBuf>,
+) -> i32 {
     let mut buffer = Vec::new();
     if let Err(e) = std::io::stdin().read_to_end(&mut buffer) {
         eprintln!("{} Failed to read stdin: {}", "ERROR:".red().bold(), e);
         return 2;
     }
     let result = engine.scan_bytes(&buffer, "stdin");
-    render_single_result(&result, json, quiet, format)
+    render_single_result(&result, json, quiet, format, output)
 }
 
 fn scan_single_file(
@@ -119,6 +157,7 @@ fn scan_single_file(
     json: bool,
     quiet: bool,
     format: Option<&str>,
+    output: Option<&PathBuf>,
     password: Option<&str>,
 ) -> i32 {
     let data = match std::fs::read(path) {
@@ -145,13 +184,13 @@ fn scan_single_file(
                     })
                     .collect();
 
-                return render_multi_results(&nested_results, json, quiet, format);
+                return render_multi_results(&nested_results, json, quiet, format, output);
             }
         }
     }
 
     let result = engine.scan_bytes(&data, &path.display().to_string());
-    render_single_result(&result, json, quiet, format)
+    render_single_result(&result, json, quiet, format, output)
 }
 
 fn render_multi_results(
@@ -159,9 +198,10 @@ fn render_multi_results(
     json: bool,
     quiet: bool,
     format: Option<&str>,
+    output: Option<&PathBuf>,
 ) -> i32 {
     if results.len() == 1 {
-        return render_single_result(&results[0], json, quiet, format);
+        return render_single_result(&results[0], json, quiet, format, output);
     }
 
     let fmt = format.unwrap_or(if json { "json" } else { "text" });
@@ -169,24 +209,24 @@ fn render_multi_results(
     match fmt {
         "html" => {
             let html_str = to_html(results);
-            println!("{}", html_str);
+            emit_formatted(&html_str, output);
         }
         "sarif" => match to_sarif(results) {
-            Ok(s) => println!("{}", s),
+            Ok(s) => emit_formatted(&s, output),
             Err(e) => {
                 eprintln!("{} Failed to serialize SARIF: {}", "ERROR:".red().bold(), e);
                 return 2;
             }
         },
         "stix" => match to_stix(results) {
-            Ok(s) => println!("{}", s),
+            Ok(s) => emit_formatted(&s, output),
             Err(e) => {
                 eprintln!("{} Failed to serialize STIX: {}", "ERROR:".red().bold(), e);
                 return 2;
             }
         },
-        "json" => match serde_json::to_string_pretty(results) {
-            Ok(j) => println!("{}", j),
+        "json" => match serde_json::to_string_pretty(&results) {
+            Ok(j) => emit_formatted(&j, output),
             Err(e) => {
                 eprintln!("{} Failed to serialize JSON: {}", "ERROR:".red().bold(), e);
                 return 2;
@@ -216,7 +256,13 @@ fn render_multi_results(
     }
 }
 
-fn render_single_result(result: &ScanResult, json: bool, quiet: bool, format: Option<&str>) -> i32 {
+fn render_single_result(
+    result: &ScanResult,
+    json: bool,
+    quiet: bool,
+    format: Option<&str>,
+    output: Option<&PathBuf>,
+) -> i32 {
     let fmt = format.unwrap_or(if json { "json" } else { "text" });
 
     match fmt {
@@ -266,24 +312,24 @@ fn render_single_result(result: &ScanResult, json: bool, quiet: bool, format: Op
         }
         "html" => {
             let html_str = to_html(std::slice::from_ref(result));
-            println!("{}", html_str);
+            emit_formatted(&html_str, output);
         }
         "sarif" => match to_sarif(std::slice::from_ref(result)) {
-            Ok(s) => println!("{}", s),
+            Ok(s) => emit_formatted(&s, output),
             Err(e) => {
                 eprintln!("{} Failed to serialize SARIF: {}", "ERROR:".red().bold(), e);
                 return 2;
             }
         },
         "stix" => match to_stix(std::slice::from_ref(result)) {
-            Ok(s) => println!("{}", s),
+            Ok(s) => emit_formatted(&s, output),
             Err(e) => {
                 eprintln!("{} Failed to serialize STIX: {}", "ERROR:".red().bold(), e);
                 return 2;
             }
         },
         "json" => match result.to_json(true) {
-            Ok(j) => println!("{}", j),
+            Ok(j) => emit_formatted(&j, output),
             Err(e) => {
                 eprintln!("{} Failed to serialize JSON: {}", "ERROR:".red().bold(), e);
                 return 2;
@@ -316,6 +362,7 @@ fn scan_directory(
     json: bool,
     quiet: bool,
     format: Option<&str>,
+    output: Option<&PathBuf>,
     password: Option<&str>,
 ) -> i32 {
     let start_time = Instant::now();
@@ -396,24 +443,24 @@ fn scan_directory(
     match fmt {
         "html" => {
             let html_str = to_html(&matched_results);
-            println!("{}", html_str);
+            emit_formatted(&html_str, output);
         }
         "sarif" => match to_sarif(&matched_results) {
-            Ok(s) => println!("{}", s),
+            Ok(s) => emit_formatted(&s, output),
             Err(e) => {
                 eprintln!("{} Failed to serialize SARIF: {}", "ERROR:".red().bold(), e);
                 return 2;
             }
         },
         "stix" => match to_stix(&matched_results) {
-            Ok(s) => println!("{}", s),
+            Ok(s) => emit_formatted(&s, output),
             Err(e) => {
                 eprintln!("{} Failed to serialize STIX: {}", "ERROR:".red().bold(), e);
                 return 2;
             }
         },
         "json" => match serde_json::to_string_pretty(&matched_results) {
-            Ok(j) => println!("{}", j),
+            Ok(j) => emit_formatted(&j, output),
             Err(e) => {
                 eprintln!("{} Failed to serialize JSON: {}", "ERROR:".red().bold(), e);
                 return 2;
