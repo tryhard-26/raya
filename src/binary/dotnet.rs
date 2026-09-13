@@ -242,10 +242,12 @@ where
                 // Last byte is a terminal byte (flag), the rest is UTF-16LE
                 let payload_len = if str_len > 0 { str_len - 1 } else { 0 };
                 let utf16_bytes = &data[p..p + payload_len];
-                let u16_chars: Vec<u16> = utf16_bytes
-                    .chunks_exact(2)
-                    .map(|c| u16::from_le_bytes([c[0], c[1]]))
-                    .collect();
+                let mut u16_chars = Vec::with_capacity(payload_len / 2);
+                let mut i = 0;
+                while i + 1 < utf16_bytes.len() {
+                    u16_chars.push(u16::from_le_bytes([utf16_bytes[i], utf16_bytes[i + 1]]));
+                    i += 2;
+                }
 
                 if let Ok(decoded) = String::from_utf16(&u16_chars) {
                     let trimmed = decoded.trim().to_string();
