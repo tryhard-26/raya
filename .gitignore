@@ -34,3 +34,5 @@ RAYA.md
 sample_report.pdf
 __pycache__/
 *.pyc
+tmp/
+/tmp/

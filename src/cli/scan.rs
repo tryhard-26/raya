@@ -355,6 +355,7 @@ fn render_single_result(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn scan_directory(
     engine: &Engine,
     dir: &Path,
