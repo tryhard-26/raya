@@ -139,53 +139,41 @@ fn parse_cs_tlv(decrypted: &[u8], xor_key: u8) -> Option<ExtractedConfig> {
         let val_bytes = &decrypted[pos + 6..pos + 6 + length];
 
         match setting_type {
-            1 => {
+            1 if length == 2 => {
                 // Beacon Type (0=HTTP, 1=DNS, 2=SMB, 4=TCP)
-                if length == 2 {
-                    let btype = u16::from_be_bytes([val_bytes[0], val_bytes[1]]);
-                    let desc = match btype {
-                        0 => "HTTP",
-                        1 => "DNS",
-                        2 => "SMB",
-                        4 => "TCP",
-                        _ => "Custom",
-                    };
-                    config
-                        .extra
-                        .push(("Beacon Type".to_string(), desc.to_string()));
-                    valid_entries += 1;
-                }
+                let btype = u16::from_be_bytes([val_bytes[0], val_bytes[1]]);
+                let desc = match btype {
+                    0 => "HTTP",
+                    1 => "DNS",
+                    2 => "SMB",
+                    4 => "TCP",
+                    _ => "Custom",
+                };
+                config
+                    .extra
+                    .push(("Beacon Type".to_string(), desc.to_string()));
+                valid_entries += 1;
             }
-            2 => {
+            2 if length == 2 => {
                 // Port
-                if length == 2 {
-                    let port = u16::from_be_bytes([val_bytes[0], val_bytes[1]]);
-                    if port > 0 {
-                        config.ports.push(port);
-                        valid_entries += 1;
-                    }
+                let port = u16::from_be_bytes([val_bytes[0], val_bytes[1]]);
+                if port > 0 {
+                    config.ports.push(port);
+                    valid_entries += 1;
                 }
             }
-            3 => {
+            3 if length == 4 => {
                 // Sleep time (ms)
-                if length == 4 {
-                    let sleep = u32::from_be_bytes([
-                        val_bytes[0],
-                        val_bytes[1],
-                        val_bytes[2],
-                        val_bytes[3],
-                    ]);
-                    config.sleep_time_ms = Some(sleep);
-                    valid_entries += 1;
-                }
+                let sleep =
+                    u32::from_be_bytes([val_bytes[0], val_bytes[1], val_bytes[2], val_bytes[3]]);
+                config.sleep_time_ms = Some(sleep);
+                valid_entries += 1;
             }
-            5 => {
+            5 if length == 2 => {
                 // Jitter (%)
-                if length == 2 {
-                    let jitter = u16::from_be_bytes([val_bytes[0], val_bytes[1]]);
-                    config.jitter_percent = Some(jitter);
-                    valid_entries += 1;
-                }
+                let jitter = u16::from_be_bytes([val_bytes[0], val_bytes[1]]);
+                config.jitter_percent = Some(jitter);
+                valid_entries += 1;
             }
             7 => {
                 // C2 Server string
@@ -219,18 +207,12 @@ fn parse_cs_tlv(decrypted: &[u8], xor_key: u8) -> Option<ExtractedConfig> {
                     valid_entries += 1;
                 }
             }
-            14 => {
+            14 if length == 4 => {
                 // Watermark
-                if length == 4 {
-                    let wm = u32::from_be_bytes([
-                        val_bytes[0],
-                        val_bytes[1],
-                        val_bytes[2],
-                        val_bytes[3],
-                    ]);
-                    config.watermark = Some(wm);
-                    valid_entries += 1;
-                }
+                let wm =
+                    u32::from_be_bytes([val_bytes[0], val_bytes[1], val_bytes[2], val_bytes[3]]);
+                config.watermark = Some(wm);
+                valid_entries += 1;
             }
             _ => {}
         }
