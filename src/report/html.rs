@@ -785,6 +785,19 @@ body {
             ));
         }
 
+        if let Some(ref tlsh_str) = res.hashes.tlsh {
+            html.push_str(&format!(
+                r###"        <div class="hash-row">
+          <div class="hash-name">TLSH</div>
+          <div class="hash-value">{}</div>
+          <button class="btn-copy" onclick="navigator.clipboard.writeText('{}'); this.innerText='Copied'">Copy</button>
+        </div>
+"###,
+                escape_html(tlsh_str),
+                tlsh_str
+            ));
+        }
+
         if let Some(ref imphash) = res.hashes.imphash {
             html.push_str(&format!(
                 r###"        <div class="hash-row">
@@ -956,6 +969,7 @@ mod tests {
                 sha1: "sha1".to_string(),
                 sha256: "sha256".to_string(),
                 ssdeep: None,
+                tlsh: None,
                 imphash: None,
                 exphash: None,
             },

@@ -93,7 +93,7 @@ pub fn load_or_compile_rules(rules_path: &Path) -> Result<Engine, String> {
         let is_binary_ext = rules_path
             .extension()
             .and_then(|ext| ext.to_str())
-            .map(|ext| matches!(ext, "rc" | "bin" | "raya_bin" | "rcache"))
+            .map(|ext| matches!(ext, "rayac" | "rc" | "bin" | "raya_bin" | "rcache"))
             .unwrap_or(false);
 
         if is_binary_ext {

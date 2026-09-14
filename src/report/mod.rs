@@ -695,6 +695,9 @@ pub fn to_stix(results: &[ScanResult]) -> Result<String, serde_json::Error> {
         if let Some(ref ssdeep) = res.hashes.ssdeep {
             hashes_obj.insert("SSDEEP".to_string(), json!(ssdeep));
         }
+        if let Some(ref tlsh_str) = res.hashes.tlsh {
+            hashes_obj.insert("TLSH".to_string(), json!(tlsh_str));
+        }
         if let Some(ref imp) = res.hashes.imphash {
             hashes_obj.insert("IMPHASH".to_string(), json!(imp));
         }
@@ -801,6 +804,7 @@ mod tests {
                 sha1: "def456".to_string(),
                 md5: "789ghi".to_string(),
                 ssdeep: Some("3:xyz:abc".to_string()),
+                tlsh: Some("T1234567890ABCDEF".to_string()),
                 imphash: Some("68f013d7437aa653a8a98a05807afeb1".to_string()),
                 exphash: None,
             },

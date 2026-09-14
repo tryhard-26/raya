@@ -15,6 +15,17 @@ pub struct PeSection {
 }
 
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct PeOverlay {
+    pub offset: usize,
+    pub size: usize,
+    pub entropy: f64,
+    pub is_high_entropy: bool,
+    pub is_certificate_table: bool,
+    pub preview: Vec<u8>,
+    pub file_type: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct PeImport {
     pub dll: String,
     pub functions: Vec<String>,
@@ -57,6 +68,7 @@ pub struct PeInfo {
     pub syscalls: Vec<crate::binary::syscall::SyscallStub>,
     pub api_hashes: Vec<crate::binary::api_hash::ApiHashMatch>,
     pub cfg: Option<crate::binary::cfg::ControlFlowGraph>,
+    pub overlay: Option<PeOverlay>,
 }
 
 impl PeInfo {
@@ -89,7 +101,24 @@ impl PeInfo {
             syscalls: Vec::new(),
             api_hashes: Vec::new(),
             cfg: None,
+            overlay: None,
         }
+    }
+
+    pub fn has_overlay(&self) -> bool {
+        self.overlay.is_some()
+    }
+
+    pub fn overlay_size(&self) -> usize {
+        self.overlay.as_ref().map(|o| o.size).unwrap_or(0)
+    }
+
+    pub fn overlay_entropy(&self) -> f64 {
+        self.overlay.as_ref().map(|o| o.entropy).unwrap_or(0.0)
+    }
+
+    pub fn overlay_offset(&self) -> usize {
+        self.overlay.as_ref().map(|o| o.offset).unwrap_or(0)
     }
 
     pub fn has_imphash(&self, target: &str) -> bool {
@@ -1005,36 +1034,48 @@ pub fn parse_pe(data: &[u8]) -> Option<PeInfo> {
             let bitness = if is_pe32_plus { 64 } else { 32 };
             let sec_va = image_base + sec.virtual_address as u64;
 
-            let strings = crate::binary::disasm::extract_stack_strings(sec_bytes, bitness, sec_va);
-            stack_strings.extend(strings);
-
-            // Decode instructions for CFG, syscalls, and API hash scanning
-            let mut decoder = iced_x86::Decoder::with_ip(
-                bitness,
-                sec_bytes,
-                sec_va,
-                iced_x86::DecoderOptions::NONE,
-            );
-            let mut instructions = Vec::new();
-            let mut instr = iced_x86::Instruction::default();
-            while decoder.can_decode() && instructions.len() < 32768 {
-                decoder.decode_out(&mut instr);
-                if !instr.is_invalid() {
-                    instructions.push(instr);
+            let is_arm64 = machine == 0xAA64 || machine == 0x01C0 || machine == 0x01C4;
+            if is_arm64 {
+                let sec_syscalls = crate::binary::syscall::detect_arm64_syscall_stubs(sec_bytes, sec_va, false);
+                syscalls.extend(sec_syscalls);
+                if primary_cfg.is_none() {
+                    primary_cfg = Some(crate::binary::cfg::ControlFlowGraph::from_arm64_bytes(
+                        sec_bytes,
+                        sec_va,
+                    ));
                 }
-            }
+            } else {
+                let strings = crate::binary::disasm::extract_stack_strings(sec_bytes, bitness, sec_va);
+                stack_strings.extend(strings);
 
-            let sec_syscalls = crate::binary::syscall::detect_syscall_stubs(&instructions);
-            syscalls.extend(sec_syscalls);
+                // Decode instructions for CFG, syscalls, and API hash scanning
+                let mut decoder = iced_x86::Decoder::with_ip(
+                    bitness,
+                    sec_bytes,
+                    sec_va,
+                    iced_x86::DecoderOptions::NONE,
+                );
+                let mut instructions = Vec::new();
+                let mut instr = iced_x86::Instruction::default();
+                while decoder.can_decode() && instructions.len() < 32768 {
+                    decoder.decode_out(&mut instr);
+                    if !instr.is_invalid() {
+                        instructions.push(instr);
+                    }
+                }
 
-            let sec_hashes =
-                crate::binary::api_hash::scan_api_hashes(sec_bytes, &instructions, &api_db);
-            api_hashes.extend(sec_hashes);
+                let sec_syscalls = crate::binary::syscall::detect_syscall_stubs(&instructions);
+                syscalls.extend(sec_syscalls);
 
-            if primary_cfg.is_none() && !instructions.is_empty() {
-                primary_cfg = Some(crate::binary::cfg::ControlFlowGraph::from_instructions(
-                    &instructions,
-                ));
+                let sec_hashes =
+                    crate::binary::api_hash::scan_api_hashes(sec_bytes, &instructions, &api_db);
+                api_hashes.extend(sec_hashes);
+
+                if primary_cfg.is_none() && !instructions.is_empty() {
+                    primary_cfg = Some(crate::binary::cfg::ControlFlowGraph::from_instructions(
+                        &instructions,
+                    ));
+                }
             }
         }
     }
@@ -1046,34 +1087,99 @@ pub fn parse_pe(data: &[u8]) -> Option<PeInfo> {
                 let ep_bytes = &data[ep_offset..end];
                 let bitness = if is_pe32_plus { 64 } else { 32 };
                 let ep_va = image_base + entry_point;
-                let mut decoder = iced_x86::Decoder::with_ip(
-                    bitness,
-                    ep_bytes,
-                    ep_va,
-                    iced_x86::DecoderOptions::NONE,
-                );
-                let mut instructions = Vec::new();
-                let mut instr = iced_x86::Instruction::default();
-                while decoder.can_decode() && instructions.len() < 32768 {
-                    decoder.decode_out(&mut instr);
-                    if !instr.is_invalid() {
-                        instructions.push(instr);
-                    }
-                }
-                if !instructions.is_empty() {
-                    syscalls.extend(crate::binary::syscall::detect_syscall_stubs(&instructions));
-                    api_hashes.extend(crate::binary::api_hash::scan_api_hashes(
+                let is_arm64 = machine == 0xAA64 || machine == 0x01C0 || machine == 0x01C4;
+                if is_arm64 {
+                    syscalls.extend(crate::binary::syscall::detect_arm64_syscall_stubs(
                         ep_bytes,
-                        &instructions,
-                        &api_db,
+                        ep_va,
+                        false,
                     ));
-                    primary_cfg = Some(crate::binary::cfg::ControlFlowGraph::from_instructions(
-                        &instructions,
+                    primary_cfg = Some(crate::binary::cfg::ControlFlowGraph::from_arm64_bytes(
+                        ep_bytes,
+                        ep_va,
                     ));
+                } else {
+                    let mut decoder = iced_x86::Decoder::with_ip(
+                        bitness,
+                        ep_bytes,
+                        ep_va,
+                        iced_x86::DecoderOptions::NONE,
+                    );
+                    let mut instructions = Vec::new();
+                    let mut instr = iced_x86::Instruction::default();
+                    while decoder.can_decode() && instructions.len() < 32768 {
+                        decoder.decode_out(&mut instr);
+                        if !instr.is_invalid() {
+                            instructions.push(instr);
+                        }
+                    }
+                    if !instructions.is_empty() {
+                        syscalls.extend(crate::binary::syscall::detect_syscall_stubs(&instructions));
+                        api_hashes.extend(crate::binary::api_hash::scan_api_hashes(
+                            ep_bytes,
+                            &instructions,
+                            &api_db,
+                        ));
+                        primary_cfg = Some(crate::binary::cfg::ControlFlowGraph::from_instructions(
+                            &instructions,
+                        ));
+                    }
                 }
             }
         }
     }
+
+    // Calculate PE image end and detect Overlay
+    let mut pe_end_offset = section_headers_offset + (num_sections * 40);
+    for sec in &sections {
+        if sec.raw_size > 0 {
+            let sec_end = (sec.raw_offset as usize).saturating_add(sec.raw_size as usize);
+            if sec_end > pe_end_offset {
+                pe_end_offset = sec_end;
+            }
+        }
+    }
+
+    let is_certificate_table = sec_dir_offset > 0
+        && sec_dir_size > 0
+        && (sec_dir_offset as usize) >= pe_end_offset
+        && (sec_dir_offset as usize) + (sec_dir_size as usize) <= data.len();
+
+    let overlay = if data.len() > pe_end_offset {
+        let overlay_data = &data[pe_end_offset..];
+        let size = overlay_data.len();
+        let entropy = crate::entropy::shannon_entropy(overlay_data);
+        let preview = overlay_data[..overlay_data.len().min(16)].to_vec();
+        let is_high_entropy = entropy >= 7.0;
+
+        let file_type = if overlay_data.starts_with(b"PK\x03\x04") {
+            Some("ZIP Archive".to_string())
+        } else if overlay_data.starts_with(b"MZ") {
+            Some("Embedded PE Executable".to_string())
+        } else if overlay_data.starts_with(b"7z\xBC\xAF\x27\x1C") {
+            Some("7-Zip Archive".to_string())
+        } else if overlay_data.starts_with(b"Rar!\x1A\x07") {
+            Some("RAR Archive".to_string())
+        } else if is_certificate_table {
+            Some("Authenticode Certificate Table".to_string())
+        } else if is_high_entropy {
+            Some("High-Entropy Payload (Encrypted/Compressed)".to_string())
+        } else {
+            Some("Appended Binary Data".to_string())
+        };
+
+        Some(PeOverlay {
+            offset: pe_end_offset,
+            size,
+            entropy,
+            is_high_entropy,
+            is_certificate_table,
+            preview,
+            file_type,
+        })
+    } else {
+        None
+    };
 
     Some(PeInfo {
         is_pe: true,
@@ -1103,6 +1209,7 @@ pub fn parse_pe(data: &[u8]) -> Option<PeInfo> {
         syscalls,
         api_hashes,
         cfg: primary_cfg,
+        overlay,
     })
 }
 
@@ -1224,3 +1331,29 @@ fn parse_rich_header(
 
     (true, entries, canonical_rich_hash, mismatch, Some(is_valid))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_pe_overlay_detection() {
+        let sample_path = "tests/fixtures/wannacry_sample.exe";
+        if let Ok(mut data) = std::fs::read(sample_path) {
+            let initial_pe = parse_pe(&data).expect("should parse fixture PE");
+            assert!(!initial_pe.has_overlay());
+
+            // Append overlay with ZIP header
+            let overlay_payload = b"PK\x03\x04embedded_payload_data_for_testing_purposes";
+            data.extend_from_slice(overlay_payload);
+
+            let overlay_pe = parse_pe(&data).expect("should parse PE with overlay");
+            assert!(overlay_pe.has_overlay());
+            assert_eq!(overlay_pe.overlay_size(), overlay_payload.len());
+            let overlay = overlay_pe.overlay.as_ref().unwrap();
+            assert_eq!(overlay.file_type.as_deref(), Some("ZIP Archive"));
+            assert!(overlay.preview.starts_with(b"PK\x03\x04"));
+        }
+    }
+}
+

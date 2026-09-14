@@ -193,6 +193,9 @@ impl<'a, 'b> Evaluator<'a, 'b> {
                 "is_go" => EvalValue::Bool(self.context.binary.golang.is_some()),
                 "is_rust" => EvalValue::Bool(self.context.binary.rust.is_some()),
                 "has_crypto" => EvalValue::Bool(self.context.binary.crypto.has_any()),
+                "has_deobfuscated" => {
+                    EvalValue::Bool(!self.context.binary.deobfuscated_strings.is_empty())
+                }
                 _ => EvalValue::None,
             },
         }
@@ -409,6 +412,72 @@ impl<'a, 'b> Evaluator<'a, 'b> {
 
     fn eval_function_call(&mut self, module: &str, function: &str, args: &[Expr]) -> EvalValue {
         let evaluated_args: Vec<EvalValue> = args.iter().map(|a| self.eval_expr(a)).collect();
+
+        if module == "hash" {
+            let target_slice = if evaluated_args.len() >= 2 {
+                if let (Some(EvalValue::Int(off)), Some(EvalValue::Int(len))) =
+                    (evaluated_args.get(0), evaluated_args.get(1))
+                {
+                    let start = (*off).max(0) as usize;
+                    let length = (*len).max(0) as usize;
+                    let end = (start + length).min(self.context.data.len());
+                    if start < self.context.data.len() {
+                        &self.context.data[start..end]
+                    } else {
+                        &[][..]
+                    }
+                } else {
+                    self.context.data
+                }
+            } else {
+                self.context.data
+            };
+
+            return match function {
+                "md5" => EvalValue::Str(crate::hash::compute_md5(target_slice)),
+                "sha256" => EvalValue::Str(crate::hash::compute_sha256(target_slice)),
+                "sha1" => {
+                    use sha1::{Digest, Sha1};
+                    let mut hasher = Sha1::new();
+                    hasher.update(target_slice);
+                    EvalValue::Str(format!("{:x}", hasher.finalize()))
+                }
+                "tlsh" => {
+                    if let Some(h) = crate::hash::compute_tlsh(target_slice) {
+                        EvalValue::Str(h)
+                    } else {
+                        EvalValue::None
+                    }
+                }
+                "ssdeep" => EvalValue::Str(crate::hash::compute_ssdeep(target_slice)),
+                _ => EvalValue::None,
+            };
+        }
+
+        if module == "deobfuscated" {
+            return match function {
+                "has" => {
+                    if let [EvalValue::Str(target), ..] = evaluated_args.as_slice() {
+                        let target_lower = target.to_ascii_lowercase();
+                        let found = self.context.binary.deobfuscated_strings.iter().find(|d| {
+                            d.plaintext.to_ascii_lowercase().contains(&target_lower)
+                        });
+                        if let Some(payload) = found {
+                            self.context.record_evidence(MatchedEvidence::Custom(format!(
+                                "Deobfuscated payload matching '{}' ({})",
+                                target, payload.algorithm
+                            )));
+                            EvalValue::Bool(true)
+                        } else {
+                            EvalValue::Bool(false)
+                        }
+                    } else {
+                        EvalValue::Bool(false)
+                    }
+                }
+                _ => EvalValue::None,
+            };
+        }
 
         if module == "pe" || module.is_empty() {
             if let Some(pe) = &self.context.binary.pe {
@@ -1445,7 +1514,7 @@ impl<'a, 'b> Evaluator<'a, 'b> {
                                     }
                                     EvalValue::Bool(has)
                                 }
-                                "overlay_size" => EvalValue::Int(
+                                "signature_overlay_size" => EvalValue::Int(
                                     pe.authenticode
                                         .as_ref()
                                         .map(|a| a.overlay_size as i64)
@@ -1482,11 +1551,53 @@ impl<'a, 'b> Evaluator<'a, 'b> {
                                         EvalValue::None
                                     }
                                 }
+                                "has_overlay" => EvalValue::Bool(pe.has_overlay()),
+                                "overlay_size" => EvalValue::Int(pe.overlay_size() as i64),
+                                "overlay_offset" => EvalValue::Int(pe.overlay_offset() as i64),
+                                "overlay_entropy" => EvalValue::Float(pe.overlay_entropy()),
+                                "overlay" => {
+                                    if let Some(sub) = sub_property {
+                                        match sub {
+                                            "exists" => EvalValue::Bool(pe.has_overlay()),
+                                            "size" => EvalValue::Int(pe.overlay_size() as i64),
+                                            "offset" => EvalValue::Int(pe.overlay_offset() as i64),
+                                            "entropy" => EvalValue::Float(pe.overlay_entropy()),
+                                            "is_high_entropy" => EvalValue::Bool(
+                                                pe.overlay
+                                                    .as_ref()
+                                                    .map(|o| o.is_high_entropy)
+                                                    .unwrap_or(false),
+                                            ),
+                                            "is_certificate_table" => EvalValue::Bool(
+                                                pe.overlay
+                                                    .as_ref()
+                                                    .map(|o| o.is_certificate_table)
+                                                    .unwrap_or(false),
+                                            ),
+                                            _ => EvalValue::None,
+                                        }
+                                    } else {
+                                        EvalValue::Bool(pe.has_overlay())
+                                    }
+                                }
                                 _ => EvalValue::None,
                             };
                         } else {
                             return EvalValue::Bool(false);
                         }
+                    } else if var_name == "hash" {
+                        return match property {
+                            "md5" => EvalValue::Str(self.context.hashes.md5.clone()),
+                            "sha1" => EvalValue::Str(self.context.hashes.sha1.clone()),
+                            "sha256" => EvalValue::Str(self.context.hashes.sha256.clone()),
+                            "ssdeep" => EvalValue::Str(
+                                self.context.hashes.ssdeep.clone().unwrap_or_default(),
+                            ),
+                            "tlsh" => EvalValue::Str(
+                                self.context.hashes.tlsh.clone().unwrap_or_default(),
+                            ),
+                            _ => EvalValue::None,
+                        };
                     } else if var_name == "cfg" {
                         if let Some(cfg) = &self.context.binary.cfg {
                             return match property {
@@ -1673,6 +1784,18 @@ impl<'a, 'b> Evaluator<'a, 'b> {
                         } else {
                             return EvalValue::Bool(false);
                         }
+                    } else if var_name == "deobfuscated" {
+                        return match property {
+                            "count" => EvalValue::Int(self.context.binary.deobfuscated_strings.len() as i64),
+                            "has_xor" => EvalValue::Bool(
+                                self.context.binary.deobfuscated_strings.iter().any(|d| d.algorithm.contains("XOR"))
+                            ),
+                            "has_base64" => EvalValue::Bool(
+                                self.context.binary.deobfuscated_strings.iter().any(|d| d.algorithm.contains("Base64"))
+                            ),
+                            "is_present" => EvalValue::Bool(!self.context.binary.deobfuscated_strings.is_empty()),
+                            _ => EvalValue::None,
+                        };
                     }
                 }
 

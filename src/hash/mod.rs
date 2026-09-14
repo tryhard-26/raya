@@ -31,6 +31,8 @@ pub struct FileHashes {
     pub md5: String,
     /// Context Triggered Piecewise Hashing (SSDEEP fuzzy hash).
     pub ssdeep: Option<String>,
+    /// Trend Micro Locality Sensitive Hash (TLSH).
+    pub tlsh: Option<String>,
     /// PE Import Hash (imphash).
     pub imphash: Option<String>,
     /// PE Export Hash (exphash).
@@ -52,8 +54,19 @@ impl fmt::Display for FileHashes {
         if let Some(ref ssd) = self.ssdeep {
             s.push_str(&format!("\nSSDEEP:  {}", ssd));
         }
+        if let Some(ref tlsh) = self.tlsh {
+            s.push_str(&format!("\nTLSH:    {}", tlsh));
+        }
         write!(f, "{}", s)
     }
+}
+
+pub fn compute_tlsh(data: &[u8]) -> Option<String> {
+    tlsh::hash_buf(data).ok().map(|t| t.to_string())
+}
+
+pub fn tlsh_distance(hash1: &str, hash2: &str) -> Option<u32> {
+    tlsh::compare(hash1, hash2).ok()
 }
 
 pub fn compute_hashes(data: &[u8]) -> FileHashes {
@@ -81,11 +94,14 @@ pub fn compute_hashes(data: &[u8]) -> FileHashes {
         None
     };
 
+    let tlsh_hash = compute_tlsh(data);
+
     FileHashes {
         sha256: sha256_hash,
         sha1: sha1_hash,
         md5: md5_hash,
         ssdeep: ssdeep_hash,
+        tlsh: tlsh_hash,
         imphash: None,
         exphash: None,
     }
@@ -296,5 +312,21 @@ mod tests {
         let sig3 = compute_ssdeep(distant);
         let distant_score = ssdeep_compare(&sig1, &sig3);
         assert!(distant_score < score);
+    }
+
+    #[test]
+    fn test_tlsh_fuzzy_hash() {
+        let sample1 = b"Trend Micro Locality Sensitive Hash is an advanced fuzzy clustering algorithm specifically engineered for binary analysis and malware classification where files differ by localized mutations or evasion techniques.";
+        let mut sample2 = sample1.to_vec();
+        sample2[20] = b'X';
+        sample2[21] = b'Y';
+        sample2[22] = b'Z';
+
+        let t1 = compute_tlsh(sample1).expect("tlsh should compute for sample1");
+        assert!(t1.starts_with("T1"));
+        let t2 = compute_tlsh(&sample2).expect("tlsh should compute for sample2");
+
+        let dist = tlsh_distance(&t1, &t2).expect("distance should compute");
+        assert!(dist < 50, "TLSH distance between variants should be small, got {}", dist);
     }
 }

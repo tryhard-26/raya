@@ -546,4 +546,56 @@ mod tests {
         assert!(rust_res.has_matches());
         assert_eq!(rust_res.matches[0].rule, "detect_rust_sample");
     }
+
+    #[test]
+    fn test_hash_and_overlay_rule_evaluation() {
+        let rule_source = r#"
+            rule detect_overlay_and_hash {
+                condition:
+                    pe.overlay.exists and pe.overlay.size > 20 and hash.md5(0, 2) == "ac6ad5d9b99757c3a878f2d275ace198"
+            }
+        "#;
+
+        let rules = parse_rules_from_str(rule_source).unwrap();
+        let engine = Engine::compile_rules(rules).unwrap();
+
+        // Use fixture and append overlay
+        if let Ok(mut data) = std::fs::read("tests/fixtures/wannacry_sample.exe") {
+            data.extend_from_slice(b"PK\x03\x04test_appended_overlay_payload_12345");
+            let res = engine.scan_bytes(&data, "sample_with_overlay.exe");
+            assert!(res.has_matches());
+            assert_eq!(res.matches[0].rule, "detect_overlay_and_hash");
+        }
+    }
+
+    #[test]
+    fn test_deobfuscation_rule_evaluation() {
+        let rule_source = r#"
+            rule detect_xor_and_base64_payloads {
+                condition:
+                    has_deobfuscated and deobfuscated.has("https://c2.malicious-domain.com") and deobfuscated.count >= 1 and deobfuscated.has_xor
+            }
+        "#;
+
+        let rules = parse_rules_from_str(rule_source).unwrap();
+        let engine = Engine::compile_rules(rules).unwrap();
+
+        // 2-byte XOR payload
+        let target = "https://c2.malicious-domain.com/beacon.php";
+        let key = [0xbe, 0xef];
+        let mut obfuscated = Vec::new();
+        for (i, b) in target.bytes().enumerate() {
+            obfuscated.push(b ^ key[i % 2]);
+        }
+
+        let mut data = vec![0x90; 64];
+        data.extend_from_slice(&obfuscated);
+        data.extend_from_slice(&[0xcc; 64]);
+
+        let res = engine.scan_bytes(&data, "dropper.bin");
+        assert!(res.has_matches());
+        assert_eq!(res.matches[0].rule, "detect_xor_and_base64_payloads");
+    }
 }
+
+

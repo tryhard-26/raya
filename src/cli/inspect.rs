@@ -52,6 +52,7 @@ struct HashesOutput<'a> {
     sha1: &'a str,
     sha256: &'a str,
     ssdeep: &'a str,
+    tlsh: Option<&'a str>,
     imphash: Option<&'a str>,
     rich_hash: Option<&'a str>,
     exphash: Option<&'a str>,
@@ -69,6 +70,7 @@ struct PeInspectOutput {
     rich_checksum_mismatch: bool,
     tls_callbacks: Vec<u64>,
     sections: Vec<SectionInspectOutput>,
+    overlay: Option<crate::binary::pe::PeOverlay>,
 }
 
 #[derive(Serialize)]
@@ -200,6 +202,7 @@ pub fn inspect_buffer(target_str: &str, data: &[u8], json: bool) -> i32 {
                     is_rwx: s.is_executable && s.is_writable,
                 })
                 .collect(),
+            overlay: p.overlay.clone(),
         });
 
         let elf_inspect = elf_info.map(|e| ElfInspectOutput {
@@ -239,6 +242,7 @@ pub fn inspect_buffer(target_str: &str, data: &[u8], json: bool) -> i32 {
                 sha1: &hashes.sha1,
                 sha256: &hashes.sha256,
                 ssdeep: fuzzy,
+                tlsh: hashes.tlsh.as_deref(),
                 imphash: pe_info.and_then(|p| p.imphash.as_deref()),
                 rich_hash: pe_info.and_then(|p| p.rich_hash.as_deref()),
                 exphash: pe_info.and_then(|p| p.exphash.as_deref()),
@@ -320,6 +324,9 @@ pub fn inspect_buffer(target_str: &str, data: &[u8], json: bool) -> i32 {
     println!("  SHA-1:     {}", hashes.sha1.yellow());
     println!("  SHA-256:   {}", hashes.sha256.yellow());
     println!("  SSDEEP:    {}", fuzzy.dimmed());
+    if let Some(ref tlsh_str) = hashes.tlsh {
+        println!("  TLSH:      {}", tlsh_str.dimmed());
+    }
     if let Some(p) = pe_info {
         if let Some(ref imp) = p.imphash {
             println!("  Imphash:   {}", imp.cyan().bold());
@@ -398,6 +405,42 @@ pub fn inspect_buffer(target_str: &str, data: &[u8], json: bool) -> i32 {
                 perms.dimmed(),
                 rwx_marker
             );
+        }
+
+        // PE Overlay Forensics
+        if let Some(ref overlay) = p.overlay {
+            println!("\n{}", "PE OVERLAY FORENSICS:".bold());
+            println!("  Offset:         0x{:08X}", overlay.offset);
+            let overlay_desc = overlay.file_type.as_deref().unwrap_or("Appended Data");
+            let size_desc = if overlay.is_high_entropy {
+                format!("{} bytes ({})", overlay.size, overlay_desc)
+                    .red()
+                    .bold()
+            } else {
+                format!("{} bytes ({})", overlay.size, overlay_desc)
+                    .cyan()
+                    .bold()
+            };
+            println!("  Size:           {}", size_desc);
+            let entropy_label = if overlay.entropy >= 7.2 {
+                "CRITICAL: Encrypted/Compressed".red().bold()
+            } else if overlay.entropy >= 6.5 {
+                "ELEVATED: High Density".yellow().bold()
+            } else {
+                "NORMAL".green()
+            };
+            println!(
+                "  Entropy:        {:.4} {} ({})",
+                overlay.entropy,
+                entropy_bar(overlay.entropy),
+                entropy_label
+            );
+            let hex_preview: Vec<String> = overlay
+                .preview
+                .iter()
+                .map(|b| format!("{:02X}", b))
+                .collect();
+            println!("  Header Bytes:   {}", hex_preview.join(" ").dimmed());
         }
 
         // Authenticode Digital Signature Audit

@@ -28,6 +28,7 @@ pub struct FileOverview {
     pub entropy: f64,
     pub imphash: Option<String>,
     pub ssdeep: Option<String>,
+    pub tlsh: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -220,17 +221,33 @@ pub fn diff_binaries(data_a: &[u8], data_b: &[u8]) -> BinaryDiffReport {
         removed_imports,
     };
 
-    // 4. Fuzzy Hash / SSDEEP Similarity
+    // 4. Fuzzy Hash / SSDEEP & TLSH Similarity
     let ssdeep_sim = if let (Some(sa), Some(sb)) = (&hashes_a.ssdeep, &hashes_b.ssdeep) {
         ssdeep_compare(sa, sb) as f64 / 100.0
     } else {
         0.0
     };
 
+    let tlsh_sim = if let (Some(ta), Some(tb)) = (&hashes_a.tlsh, &hashes_b.tlsh) {
+        if let Some(dist) = crate::hash::tlsh_distance(ta, tb) {
+            (1.0 - (dist as f64 / 200.0)).clamp(0.0, 1.0)
+        } else {
+            0.0
+        }
+    } else {
+        0.0
+    };
+
+    let fuzzy_sim = if hashes_a.tlsh.is_some() && hashes_b.tlsh.is_some() {
+        (ssdeep_sim * 0.5) + (tlsh_sim * 0.5)
+    } else {
+        ssdeep_sim
+    };
+
     // 5. Overall Weighted Composite Similarity Score
     let overall_sim = (cfg_similarity * 0.35)
         + (jaccard_similarity * 0.25)
-        + (ssdeep_sim * 0.20)
+        + (fuzzy_sim * 0.20)
         + (sec_sim * 0.20);
 
     let mut structural_summary = Vec::new();
@@ -275,6 +292,7 @@ pub fn diff_binaries(data_a: &[u8], data_b: &[u8]) -> BinaryDiffReport {
         entropy: crate::entropy::shannon_entropy(data_a),
         imphash: analysis_a.pe.as_ref().and_then(|p| p.imphash.clone()),
         ssdeep: hashes_a.ssdeep,
+        tlsh: hashes_a.tlsh,
     };
 
     let file_b_metrics = FileOverview {
@@ -284,6 +302,7 @@ pub fn diff_binaries(data_a: &[u8], data_b: &[u8]) -> BinaryDiffReport {
         entropy: crate::entropy::shannon_entropy(data_b),
         imphash: analysis_b.pe.as_ref().and_then(|p| p.imphash.clone()),
         ssdeep: hashes_b.ssdeep,
+        tlsh: hashes_b.tlsh,
     };
 
     BinaryDiffReport {

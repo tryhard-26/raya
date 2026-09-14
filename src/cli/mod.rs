@@ -110,7 +110,7 @@ pub enum Commands {
         rules: PathBuf,
 
         /// Output compiled rule cache path
-        #[arg(short, long, default_value = "rules.rc")]
+        #[arg(short, long, default_value = "rules.rayac")]
         output: PathBuf,
     },
 

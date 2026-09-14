@@ -168,6 +168,118 @@ pub fn detect_syscall_stubs(instructions: &[Instruction]) -> Vec<SyscallStub> {
     stubs
 }
 
+/// Scans ARM64 machine code for direct system call transitions (`SVC #0` / `SVC #0x80`).
+pub fn detect_arm64_syscall_stubs(code: &[u8], base_ip: u64, is_darwin: bool) -> Vec<SyscallStub> {
+    let mut stubs = Vec::new();
+    if code.len() < 4 {
+        return stubs;
+    }
+
+    let num_words = code.len() / 4;
+    for i in 0..num_words {
+        let offset = i * 4;
+        let inst = u32::from_le_bytes([
+            code[offset],
+            code[offset + 1],
+            code[offset + 2],
+            code[offset + 3],
+        ]);
+        let ip = base_ip + offset as u64;
+
+        // Check for SVC instruction: bits 31..21 = 0b11010100000 (0xD4000000), bits 4..0 = 0b00001 (0x01)
+        if (inst & 0xFFE0001F) == 0xD4000001 {
+            let svc_imm = (inst >> 5) & 0xFFFF;
+
+            // Look back up to 4 instructions for SSN loaded into x16 (Darwin), x8 (Linux), or x0
+            let start_idx = i.saturating_sub(4);
+            let mut ssn = None;
+            let mut disasm_lines = Vec::new();
+
+            for j in start_idx..i {
+                let prev_off = j * 4;
+                let prev_inst = u32::from_le_bytes([
+                    code[prev_off],
+                    code[prev_off + 1],
+                    code[prev_off + 2],
+                    code[prev_off + 3],
+                ]);
+
+                // MOVZ Xd, #imm16: bits 31..23 = 0b110100101 (0xD2800000)
+                if (prev_inst & 0xFF800000) == 0xD2800000 {
+                    let rd = prev_inst & 0x1F;
+                    let imm = (prev_inst >> 5) & 0xFFFF;
+                    if (is_darwin && rd == 16) || (!is_darwin && (rd == 8 || rd == 16)) {
+                        ssn = Some(imm);
+                        disasm_lines.push(format!("mov x{}, #0x{:x}", rd, imm));
+                    }
+                }
+                // MOVZ Wd, #imm16: bits 31..23 = 0b010100101 (0x52800000)
+                else if (prev_inst & 0xFF800000) == 0x52800000 {
+                    let rd = prev_inst & 0x1F;
+                    let imm = (prev_inst >> 5) & 0xFFFF;
+                    if (is_darwin && rd == 16) || (!is_darwin && (rd == 8 || rd == 16)) {
+                        ssn = Some(imm);
+                        disasm_lines.push(format!("mov w{}, #0x{:x}", rd, imm));
+                    }
+                }
+            }
+
+            disasm_lines.push(format!("svc #0x{:x}", svc_imm));
+
+            let estimated_api = if is_darwin {
+                ssn.and_then(map_darwin_arm64_syscall).map(|s| s.to_string())
+            } else {
+                ssn.and_then(map_linux_arm64_syscall).map(|s| s.to_string())
+            };
+
+            stubs.push(SyscallStub {
+                address: ip,
+                ssn,
+                estimated_api,
+                stub_type: SyscallType::Direct,
+                disassembly: disasm_lines.join("; "),
+            });
+        }
+    }
+
+    stubs
+}
+
+pub fn map_darwin_arm64_syscall(ssn: u32) -> Option<&'static str> {
+    match ssn {
+        1 => Some("sys_exit"),
+        2 => Some("sys_fork"),
+        3 => Some("sys_read"),
+        4 => Some("sys_write"),
+        5 => Some("sys_open"),
+        6 => Some("sys_close"),
+        7 => Some("sys_wait4"),
+        20 => Some("sys_getpid"),
+        73 => Some("sys_munmap"),
+        74 => Some("sys_mprotect"),
+        197 => Some("sys_mmap"),
+        202 => Some("sys_sysctl"),
+        338 => Some("sys_proc_info"),
+        _ => None,
+    }
+}
+
+pub fn map_linux_arm64_syscall(ssn: u32) -> Option<&'static str> {
+    match ssn {
+        56 => Some("openat"),
+        57 => Some("close"),
+        63 => Some("read"),
+        64 => Some("write"),
+        93 => Some("exit"),
+        94 => Some("exit_group"),
+        220 => Some("clone"),
+        221 => Some("execve"),
+        222 => Some("mmap"),
+        226 => Some("mprotect"),
+        _ => None,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -222,5 +334,22 @@ mod tests {
         assert_eq!(s.stub_type, SyscallType::Indirect);
         assert_eq!(s.ssn, Some(0x50));
         assert_eq!(s.estimated_api.as_deref(), Some("NtProtectVirtualMemory"));
+    }
+
+    #[test]
+    fn test_arm64_darwin_syscall_detection() {
+        // movz x16, #1 (sys_exit) -> 0xD2800030 (rd = 16, imm = 1)
+        // svc #0x80 -> 0xD4001001
+        let mut code = Vec::new();
+        let movz_x16: u32 = 0xD2800000 | (1 << 5) | 16;
+        let svc_80: u32 = 0xD4000001 | (0x80 << 5);
+        code.extend_from_slice(&movz_x16.to_le_bytes());
+        code.extend_from_slice(&svc_80.to_le_bytes());
+
+        let stubs = detect_arm64_syscall_stubs(&code, 0x1000, true);
+        assert_eq!(stubs.len(), 1);
+        assert_eq!(stubs[0].stub_type, SyscallType::Direct);
+        assert_eq!(stubs[0].ssn, Some(1));
+        assert_eq!(stubs[0].estimated_api.as_deref(), Some("sys_exit"));
     }
 }
